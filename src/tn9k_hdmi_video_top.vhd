@@ -1,13 +1,15 @@
 --------------------------------------------------------------------------------
--- Tang Nano 9K HDMI Video Test - Top Level
+-- Tang Nano 9K HDMI Video + Audio Test - Top Level
 --------------------------------------------------------------------------------
 -- Description:
---   HDMI encoder demonstration for video only.
---   Generates a color bar test pattern.
+--   HDMI encoder demonstration with video and audio.
+--   Generates a color bar test pattern with 1 kHz test tone.
 --
 -- Features:
 --   - 640x480@60Hz video (8 vertical color bars)
---   - DVI-compliant output (can be used with HDMI monitors)
+--   - 16-bit LPCM audio, 2-channel (L,R), 48 kHz
+--   - HDMI 1.0/1.4a compliant (ACR, ASP, AIF, AVI packets)
+--   - Data islands in horizontal back porch only
 --
 -- Hardware: Tang Nano 9K (Gowin GW1NR-9C FPGA)
 -- Author: Tang Nano 9K HDMI Project
@@ -84,13 +86,51 @@ architecture rtl of tn9k_hdmi_video_top is
             r              : in  std_logic_vector(7 downto 0);
             g              : in  std_logic_vector(7 downto 0);
             b              : in  std_logic_vector(7 downto 0);
+            -- Audio inputs
+            audio_ce       : in  std_logic;
+            audio_l        : in  std_logic_vector(15 downto 0);
+            audio_r        : in  std_logic_vector(15 downto 0);
+            audio_valid    : in  std_logic;
+            audio_mute     : in  std_logic;
+            -- Timing outputs
+            h_count_out    : out unsigned(10 downto 0);
+            v_count_out    : out unsigned(9 downto 0);
+            de_debug       : out std_logic;
+            -- Debug outputs
+            dbg_audio_tx_cnt  : out std_logic_vector(15 downto 0);
+            dbg_island_active : out std_logic;
+            dbg_packet_type   : out std_logic_vector(2 downto 0);
+            -- HDMI outputs
             tmds_clk_p     : out std_logic;
             tmds_clk_n     : out std_logic;
             tmds_data_p    : out std_logic_vector(2 downto 0);
-            tmds_data_n    : out std_logic_vector(2 downto 0);
-            h_count_out    : out unsigned(10 downto 0);
-            v_count_out    : out unsigned(9 downto 0);
-            de_debug       : out std_logic
+            tmds_data_n    : out std_logic_vector(2 downto 0)
+        );
+    end component;
+
+    component audio_ce_gen
+        generic (
+            PIXEL_CLK_FREQ    : integer;
+            AUDIO_SAMPLE_RATE : integer
+        );
+        port (
+            clk_pixel       : in  std_logic;
+            rst_n           : in  std_logic;
+            ext_audio_toggle : in  std_logic;
+            audio_ce        : out std_logic;
+            dbg_ce_counter  : out std_logic_vector(15 downto 0)
+        );
+    end component;
+
+    component audio_test_gen
+        port (
+            clk         : in  std_logic;
+            rst_n       : in  std_logic;
+            audio_ce    : in  std_logic;
+            enable      : in  std_logic;
+            volume      : in  std_logic_vector(3 downto 0);
+            audio_l     : out std_logic_vector(15 downto 0);
+            audio_r     : out std_logic_vector(15 downto 0)
         );
     end component;
 
@@ -127,6 +167,17 @@ architecture rtl of tn9k_hdmi_video_top is
     -- Timing counters
     signal horizontal_counter   : unsigned(10 downto 0);
     signal vertical_counter     : unsigned(9 downto 0);
+
+    -- Audio signals
+    signal audio_clock_enable   : std_logic;
+    signal audio_l_test         : std_logic_vector(15 downto 0);
+    signal audio_r_test         : std_logic_vector(15 downto 0);
+    
+    -- Debug signals (unused, but needed for port mapping)
+    signal dbg_audio_ce_count   : std_logic_vector(15 downto 0);
+    signal dbg_audio_tx_count   : std_logic_vector(15 downto 0);
+    signal dbg_island_active_sig : std_logic;
+    signal dbg_packet_type_sig  : std_logic_vector(2 downto 0);
 
 begin
 
@@ -187,7 +238,37 @@ begin
         );
 
     --------------------------------------------------------------------------------
-    -- HDMI Encoder
+    -- Audio Clock Enable Generator (48 kHz from 25.2 MHz)
+    --------------------------------------------------------------------------------
+    audio_ce_generator: audio_ce_gen
+        generic map (
+            PIXEL_CLK_FREQ    => 25_200_000,
+            AUDIO_SAMPLE_RATE => 48_000
+        )
+        port map (
+            clk_pixel       => pixel_clock,
+            rst_n           => reset_synchronized,
+            ext_audio_toggle => '0',  -- Not using external audio source
+            audio_ce        => audio_clock_enable,
+            dbg_ce_counter  => dbg_audio_ce_count
+        );
+
+    --------------------------------------------------------------------------------
+    -- Audio Test Tone Generator (1 kHz sine wave)
+    --------------------------------------------------------------------------------
+    audio_tone_gen: audio_test_gen
+        port map (
+            clk         => pixel_clock,
+            rst_n       => reset_synchronized,
+            audio_ce    => audio_clock_enable,
+            enable      => '1',  -- Always enabled for testing
+            volume      => (others => '0'),
+            audio_l     => audio_l_test,
+            audio_r     => audio_r_test
+        );
+
+    --------------------------------------------------------------------------------
+    -- HDMI Encoder with Audio Support
     --------------------------------------------------------------------------------
     hdmi_encoder_inst: hdmi_encoder
         generic map (
@@ -197,21 +278,34 @@ begin
             V_TOTAL  => V_TOTAL
         )
         port map (
+            -- Clock and reset
             clk_pixel      => pixel_clock,
             clk_serial     => serial_clock_5x,
             rst_n          => reset_synchronized,
+            -- Video inputs
             hsync          => video_hsync,
             vsync          => video_vsync,
             r              => video_red,
             g              => video_green,
             b              => video_blue,
+            -- Audio inputs
+            audio_ce       => audio_clock_enable,
+            audio_l        => audio_l_test,
+            audio_r        => audio_r_test,
+            audio_valid    => '1',  -- Always valid when test tone enabled
+            audio_mute     => '0',
+            -- HDMI outputs
             tmds_clk_p     => tmds_clk_p,
             tmds_clk_n     => tmds_clk_n,
             tmds_data_p    => tmds_data_p,
             tmds_data_n    => tmds_data_n,
+            -- Debug outputs
             h_count_out    => horizontal_counter,
             v_count_out    => vertical_counter,
-            de_debug       => video_data_enable
+            de_debug       => video_data_enable,
+            dbg_audio_tx_cnt  => dbg_audio_tx_count,
+            dbg_island_active => dbg_island_active_sig,
+            dbg_packet_type   => dbg_packet_type_sig
         );
 
 end rtl;

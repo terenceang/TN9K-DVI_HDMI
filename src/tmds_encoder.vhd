@@ -150,8 +150,9 @@ entity tmds_encoder is
                                                       -- (Red, Green, or Blue) pixel data
                                                       -- Only encoded when de = '1'
 
-        data_in : in  std_logic_vector(3 downto 0);  -- 4-bit data for TERC4 encoding
+        data_in : in  std_logic_vector(9 downto 0);  -- 10-bit pre-encoded TERC4 data
                                                       -- Only used when data_island = '1'
+                                                      -- Must be already TERC4-encoded
 
         dout    : out std_logic_vector(9 downto 0)   -- 10-bit TMDS encoded output
                                                       -- To be serialized 10:1 and transmitted
@@ -283,34 +284,13 @@ begin
             -- fresh when video data resumes.
             if data_island = '1' then
                 --------------------------------------------------------------------
-                -- Data Island Period: TERC4 Encoding for Audio/Packet Data
+                -- Data Island Period: Pass-through Pre-encoded TERC4 Data
                 --------------------------------------------------------------------
-                -- CRITICAL: Do NOT reset cnt during data islands/guard bands!
-                -- This maintains DC balance continuity when transitioning back to video.
-                -- The TERC4 symbols are pre-balanced, so we just preserve cnt.
-                --
-                -- ZERO-CYCLE LATENCY FIX: Assign both q_out AND dout in same cycle
-                -- to eliminate the 1-cycle delay that was causing timing corruption
-
-                case data_in is
-                    when "0000" => output_register <= "1010011100"; dout <= "1010011100";
-                    when "0001" => output_register <= "1001100011"; dout <= "1001100011";
-                    when "0010" => output_register <= "1011100100"; dout <= "1011100100";
-                    when "0011" => output_register <= "1011100010"; dout <= "1011100010";
-                    when "0100" => output_register <= "0101110001"; dout <= "0101110001";
-                    when "0101" => output_register <= "0100011110"; dout <= "0100011110";
-                    when "0110" => output_register <= "0110001110"; dout <= "0110001110";
-                    when "0111" => output_register <= "0100111100"; dout <= "0100111100";
-                    when "1000" => output_register <= "1011001100"; dout <= "1011001100";
-                    when "1001" => output_register <= "0100111001"; dout <= "0100111001";
-                    when "1010" => output_register <= "0110011100"; dout <= "0110011100";
-                    when "1011" => output_register <= "1011000110"; dout <= "1011000110";
-                    when "1100" => output_register <= "1010001110"; dout <= "1010001110";
-                    when "1101" => output_register <= "1001110001"; dout <= "1001110001";
-                    when "1110" => output_register <= "0101100011"; dout <= "0101100011";
-                    when "1111" => output_register <= "1011000011"; dout <= "1011000011";
-                    when others => output_register <= "1010011100"; dout <= "1010011100";
-                end case;
+                -- The data_in port now receives 10-bit pre-encoded TERC4 data from
+                -- dedicated terc4_encoder modules. Just pass it through.
+                -- TERC4 symbols are pre-balanced, so disparity_counter is preserved.
+                output_register <= data_in;
+                dout <= data_in;
                 -- disparity_counter is NOT modified - maintains DC balance from previous video period
 
             elsif de = '0' then

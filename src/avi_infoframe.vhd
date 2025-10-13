@@ -71,7 +71,20 @@ architecture rtl of avi_infoframe is
     -- AVI Packet Structure (8 words × 32 bits)
     --------------------------------------------------------------------------------
     type avi_packet_t is array (0 to 7) of std_logic_vector(31 downto 0);
-    signal avi_packet_rom : avi_packet_t;
+    
+    -- Static part of AVI packet (checksum computed at runtime)
+    constant AVI_PACKET_BASE : avi_packet_t := (
+        0 => x"00" & AVI_LENGTH & AVI_VERSION & AVI_TYPE,  -- Checksum filled at runtime
+        1 => ('0' & VIDEO_ID_CODE) & x"00" & ("00" & ASPECT_RATIO & ACTIVE_FORMAT) & ("0" & COLOR_SPACE & '1' & "00" & "00"),
+        2 => x"000000" & (x"0" & PIXEL_REPEAT),
+        3 => x"00000000",
+        4 => x"00000000",
+        5 => x"00000000",
+        6 => x"00000000",
+        7 => x"00000000"
+    );
+    
+    signal avi_packet_with_checksum : avi_packet_t;
     signal checksum : unsigned(7 downto 0);
     
     --------------------------------------------------------------------------------
@@ -132,19 +145,19 @@ begin
             sum := sum + unsigned(AVI_LENGTH);
             
             -- Data Byte 1: Scan Info[1:0] | Bar Info[3:2] | Active Format[4] | Color[6:5] | Reserved[7]
-            sum := sum + ("0" & COLOR_SPACE & '1' & "00" & "00");  -- RGB, Active Format valid
+            sum := sum + unsigned(std_logic_vector'("0" & COLOR_SPACE & '1' & "00" & "00"));  -- RGB, Active Format valid
             
             -- Data Byte 2: Active Format[3:0] | Aspect Ratio[5:4] | Colorimetry[7:6]
-            sum := sum + ("00" & ASPECT_RATIO & ACTIVE_FORMAT);
+            sum := sum + unsigned(std_logic_vector'("00" & ASPECT_RATIO & ACTIVE_FORMAT));
             
             -- Data Byte 3: Nonuniform scaling, RGB Quantization
             sum := sum + x"00";
             
             -- Data Byte 4: VIC[6:0] | Reserved[7]
-            sum := sum + ('0' & VIDEO_ID_CODE);
+            sum := sum + unsigned(std_logic_vector'('0' & VIDEO_ID_CODE));
             
             -- Data Byte 5: Pixel Repeat[3:0] | Reserved[7:4]
-            sum := sum + (x"0" & PIXEL_REPEAT);
+            sum := sum + unsigned(std_logic_vector'(x"0" & PIXEL_REPEAT));
             
             -- Data Bytes 6-13: Reserved (0x00)
             for i in 6 to 13 loop
@@ -157,37 +170,17 @@ begin
     end process checksum_calc;
     
     --------------------------------------------------------------------------------
-    -- AVI Packet ROM Initialization
+    -- AVI Packet Assembly with Checksum
     --------------------------------------------------------------------------------
-    avi_packet_init: process(clk_pixel, rst_n)
+    -- Combine base packet with computed checksum
+    --------------------------------------------------------------------------------
+    avi_packet_assembly: process(checksum)
     begin
-        if rst_n = '0' then
-            -- Word 0: Type | Version | Length | Checksum
-            avi_packet_rom(0) <= std_logic_vector(checksum) & AVI_LENGTH & AVI_VERSION & AVI_TYPE;
-            
-            -- Word 1: Data Bytes 1-4
-            -- DB1: Y[6:5]=00 (RGB), A[4]=1 (Active Format valid), B[3:2]=00, S[1:0]=00
-            -- DB2: C[7:6]=00 (No colorimetry), M[5:4]=01 (4:3), R[3:0]=1000 (Same as picture)
-            -- DB3: ITC/EC/Q/SC = 0x00
-            -- DB4: VIC[6:0]=1, Reserved[7]=0
-            avi_packet_rom(1) <= ('0' & VIDEO_ID_CODE) & x"00" & ("00" & ASPECT_RATIO & ACTIVE_FORMAT) & ("0" & COLOR_SPACE & '1' & "00" & "00");
-            
-            -- Word 2: Data Bytes 5-8
-            -- DB5: PR[3:0]=0000, Reserved[7:4]=0000
-            -- DB6-8: Reserved = 0x00
-            avi_packet_rom(2) <= x"000000" & (x"0" & PIXEL_REPEAT);
-            
-            -- Words 3-7: Data Bytes 9-13 + padding
-            avi_packet_rom(3) <= x"00000000";
-            avi_packet_rom(4) <= x"00000000";
-            avi_packet_rom(5) <= x"00000000";
-            avi_packet_rom(6) <= x"00000000";
-            avi_packet_rom(7) <= x"00000000";
-        else
-            -- Update checksum in Word 0 dynamically
-            avi_packet_rom(0)(31 downto 24) <= std_logic_vector(checksum);
-        end if;
-    end process avi_packet_init;
+        -- Copy base packet
+        avi_packet_with_checksum <= AVI_PACKET_BASE;
+        -- Insert checksum into word 0 bits [31:24]
+        avi_packet_with_checksum(0)(31 downto 24) <= std_logic_vector(checksum);
+    end process avi_packet_assembly;
     
     --------------------------------------------------------------------------------
     -- Transmission Request Logic
@@ -256,10 +249,18 @@ begin
                 --------------------------------------------------------------------
                 when ST_SEND_PACKET =>
                     -- Output current word from ROM
-                    avi_data_reg <= avi_packet_rom(to_integer(word_index));
+                    avi_data_reg <= avi_packet_with_checksum(to_integer(word_index));
                     avi_valid_reg <= '1';
-                    avi_start_reg <= '1' when word_index = 0 else '0';
-                    avi_end_reg <= '1' when word_index = 7 else '0';
+                    if word_index = 0 then
+                        avi_start_reg <= '1';
+                    else
+                        avi_start_reg <= '0';
+                    end if;
+                    if word_index = 7 then
+                        avi_end_reg <= '1';
+                    else
+                        avi_end_reg <= '0';
+                    end if;
                     
                     -- Wait for scheduler ready
                     if avi_ready = '1' then

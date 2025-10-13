@@ -77,7 +77,18 @@ architecture rtl of acr_packet is
     -- ACR Packet Structure (8 words × 32 bits)
     --------------------------------------------------------------------------------
     type acr_packet_t is array (0 to 7) of std_logic_vector(31 downto 0);
-    signal acr_packet_rom : acr_packet_t;
+    
+    -- ACR packet ROM as constant (eliminates latch warnings)
+    constant ACR_PACKET_ROM : acr_packet_t := (
+        0 => x"00" & x"00" & x"00" & ACR_HEADER_TYPE,  -- Header: Type=0x01
+        1 => std_logic_vector(to_unsigned(CTS_VALUE, 20)) & x"000",  -- CTS value
+        2 => std_logic_vector(to_unsigned(N_VALUE, 20)) & x"000",    -- N value
+        3 => (others => '0'),  -- Padding
+        4 => (others => '0'),
+        5 => (others => '0'),
+        6 => (others => '0'),
+        7 => (others => '0')
+    );
     
     --------------------------------------------------------------------------------
     -- State Machine
@@ -119,36 +130,6 @@ architecture rtl of acr_packet is
 
 begin
 
-    --------------------------------------------------------------------------------
-    -- ACR Packet ROM Initialization
-    --------------------------------------------------------------------------------
-    -- Format per HDMI spec section 5.3.3:
-    --   Word 0: Header (Type, Version, Length)
-    --   Words 1-7: CTS and N values
-    --------------------------------------------------------------------------------
-    acr_packet_init: process(clk_pixel, rst_n)
-    begin
-        if rst_n = '0' then
-            -- Header: Type=0x01 (ACR)
-            acr_packet_rom(0) <= x"00" & x"00" & x"00" & ACR_HEADER_TYPE;
-            
-            -- Subpacket 0: CTS[19:0] (split across bytes)
-            -- CTS = 25200 = 0x6270
-            acr_packet_rom(1) <= std_logic_vector(to_unsigned(CTS_VALUE, 20)) & x"000";
-            
-            -- Subpacket 1: N[19:0] (split across bytes)
-            -- N = 6144 = 0x1800
-            acr_packet_rom(2) <= std_logic_vector(to_unsigned(N_VALUE, 20)) & x"000";
-            
-            -- Remaining words: padding
-            acr_packet_rom(3) <= (others => '0');
-            acr_packet_rom(4) <= (others => '0');
-            acr_packet_rom(5) <= (others => '0');
-            acr_packet_rom(6) <= (others => '0');
-            acr_packet_rom(7) <= (others => '0');
-        end if;
-    end process acr_packet_init;
-    
     --------------------------------------------------------------------------------
     -- Transmission Timer
     --------------------------------------------------------------------------------
@@ -215,10 +196,18 @@ begin
                 --------------------------------------------------------------------
                 when ST_SEND_PACKET =>
                     -- Output current word from ROM
-                    acr_data_reg <= acr_packet_rom(to_integer(word_index));
+                    acr_data_reg <= ACR_PACKET_ROM(to_integer(word_index));
                     acr_valid_reg <= '1';
-                    acr_start_reg <= '1' when word_index = 0 else '0';
-                    acr_end_reg <= '1' when word_index = 7 else '0';
+                    if word_index = 0 then
+                        acr_start_reg <= '1';
+                    else
+                        acr_start_reg <= '0';
+                    end if;
+                    if word_index = 7 then
+                        acr_end_reg <= '1';
+                    else
+                        acr_end_reg <= '0';
+                    end if;
                     
                     -- Wait for scheduler ready
                     if acr_ready = '1' then

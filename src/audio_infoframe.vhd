@@ -68,7 +68,20 @@ architecture rtl of audio_infoframe is
     -- AIF Packet Structure (8 words × 32 bits)
     --------------------------------------------------------------------------------
     type aif_packet_t is array (0 to 7) of std_logic_vector(31 downto 0);
-    signal aif_packet_rom : aif_packet_t;
+    
+    -- Static part of AIF packet (checksum computed at runtime)
+    constant AIF_PACKET_BASE : aif_packet_t := (
+        0 => x"00" & AIF_LENGTH & AIF_VERSION & AIF_TYPE,  -- Checksum filled at runtime
+        1 => x"00" & x"00" & (SAMPLE_SIZE & SAMPLE_FREQUENCY & "000") & (AUDIO_CODING_TYPE & CHANNEL_COUNT & '0'),
+        2 => x"00000000",
+        3 => x"00000000",
+        4 => x"00000000",
+        5 => x"00000000",
+        6 => x"00000000",
+        7 => x"00000000"
+    );
+    
+    signal aif_packet_with_checksum : aif_packet_t;
     signal checksum : unsigned(7 downto 0);
     
     --------------------------------------------------------------------------------
@@ -114,9 +127,9 @@ begin
     --------------------------------------------------------------------------------
     -- Checksum Calculation
     --------------------------------------------------------------------------------
-    -- Checksum = 256 - (sum of all header and data bytes) mod 256
+    -- Checksum Calculation
     --------------------------------------------------------------------------------
-    checksum_calc: process(clk_pixel, rst_n)
+    checksum_proc: process(clk_pixel, rst_n)
         variable sum : unsigned(15 downto 0);
     begin
         if rst_n = '0' then
@@ -129,10 +142,12 @@ begin
             sum := sum + unsigned(AIF_LENGTH);
             
             -- Data Byte 1: CT[3:0] | CC[2:0] | Reserved[0]
-            sum := sum + (x"0" & AUDIO_CODING_TYPE) + ("00000" & CHANNEL_COUNT);
+            sum := sum + unsigned(std_logic_vector'(x"0" & AUDIO_CODING_TYPE));
+            sum := sum + unsigned(std_logic_vector'("00000" & CHANNEL_COUNT));
             
             -- Data Byte 2: SF[2:0] | SS[1:0] | Reserved[2:0]
-            sum := sum + ("00000" & SAMPLE_FREQUENCY) + ("000000" & SAMPLE_SIZE);
+            sum := sum + unsigned(std_logic_vector'("00000" & SAMPLE_FREQUENCY));
+            sum := sum + unsigned(std_logic_vector'("000000" & SAMPLE_SIZE));
             
             -- Data Byte 3: Reserved (0x00)
             sum := sum + x"00";
@@ -146,43 +161,20 @@ begin
             -- Calculate checksum
             checksum <= 256 - sum(7 downto 0);
         end if;
-    end process checksum_calc;
+    end process checksum_proc;
     
     --------------------------------------------------------------------------------
-    -- AIF Packet ROM Initialization
+    -- AIF Packet Assembly with Checksum
     --------------------------------------------------------------------------------
-    -- Format per HDMI spec CEA-861-D:
-    --   Word 0: Header (Type, Version, Length, Checksum)
-    --   Words 1-2: Data bytes (audio format info)
-    --   Words 3-7: Reserved/padding
+    -- Combine base packet with computed checksum
     --------------------------------------------------------------------------------
-    aif_packet_init: process(clk_pixel, rst_n)
+    aif_packet_assembly: process(checksum)
     begin
-        if rst_n = '0' then
-            -- Word 0: Type | Version | Length | Checksum
-            aif_packet_rom(0) <= std_logic_vector(checksum) & AIF_LENGTH & AIF_VERSION & AIF_TYPE;
-            
-            -- Word 1: Data Byte 1 | Data Byte 2 | Data Byte 3 | Data Byte 4
-            -- DB1: CT[7:4]=0001 (LPCM), CC[3:1]=001 (2ch), Reserved[0]=0
-            -- DB2: SF[7:5]=011 (48kHz), SS[4:3]=10 (16-bit), Reserved[2:0]=000
-            -- DB3: Reserved = 0x00
-            -- DB4: Speaker allocation = 0x00 (stereo)
-            aif_packet_rom(1) <= x"00" & x"00" & ("00000" & SAMPLE_FREQUENCY & SAMPLE_SIZE & "000") & (x"0" & AUDIO_CODING_TYPE & CHANNEL_COUNT & '0');
-            
-            -- Word 2: Data Bytes 5-8 (reserved)
-            aif_packet_rom(2) <= x"00000000";
-            
-            -- Words 3-7: Data Bytes 9-10 + padding
-            aif_packet_rom(3) <= x"00000000";
-            aif_packet_rom(4) <= x"00000000";
-            aif_packet_rom(5) <= x"00000000";
-            aif_packet_rom(6) <= x"00000000";
-            aif_packet_rom(7) <= x"00000000";
-        else
-            -- Update checksum in Word 0 dynamically
-            aif_packet_rom(0)(31 downto 24) <= std_logic_vector(checksum);
-        end if;
-    end process aif_packet_init;
+        -- Copy base packet
+        aif_packet_with_checksum <= AIF_PACKET_BASE;
+        -- Insert checksum into word 0 bits [31:24]
+        aif_packet_with_checksum(0)(31 downto 24) <= std_logic_vector(checksum);
+    end process aif_packet_assembly;
     
     --------------------------------------------------------------------------------
     -- Transmission Request Logic
@@ -251,10 +243,18 @@ begin
                 --------------------------------------------------------------------
                 when ST_SEND_PACKET =>
                     -- Output current word from ROM
-                    aif_data_reg <= aif_packet_rom(to_integer(word_index));
+                    aif_data_reg <= aif_packet_with_checksum(to_integer(word_index));
                     aif_valid_reg <= '1';
-                    aif_start_reg <= '1' when word_index = 0 else '0';
-                    aif_end_reg <= '1' when word_index = 7 else '0';
+                    if word_index = 0 then
+                        aif_start_reg <= '1';
+                    else
+                        aif_start_reg <= '0';
+                    end if;
+                    if word_index = 7 then
+                        aif_end_reg <= '1';
+                    else
+                        aif_end_reg <= '0';
+                    end if;
                     
                     -- Wait for scheduler ready
                     if aif_ready = '1' then

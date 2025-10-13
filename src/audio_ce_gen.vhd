@@ -124,13 +124,15 @@ begin
             ext_toggle_sync1 <= ext_audio_toggle;
             ext_toggle_sync2 <= ext_toggle_sync1;
             
-            -- Edge detection (toggle changed)
-            ext_toggle_prev <= ext_toggle_sync2;
+            -- Registered edge detection (compare with previous cycle's value)
             if ext_toggle_sync2 /= ext_toggle_prev then
                 ext_audio_event <= '1';
             else
                 ext_audio_event <= '0';
             end if;
+            
+            -- Update previous value for next cycle
+            ext_toggle_prev <= ext_toggle_sync2;
         end if;
     end process cdc_synchronizer;
     

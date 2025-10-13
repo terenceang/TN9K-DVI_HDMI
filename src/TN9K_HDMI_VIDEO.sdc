@@ -1,9 +1,9 @@
 # Copyright (C)2014-2025 Gowin Semiconductor Corporation.
 # All rights reserved.
-# File Title: Timing Constraints file for Tang Nano 9K HDMI Encoder (Video Only)
+# File Title: Timing Constraints file for Tang Nano 9K HDMI Encoder (Video + Audio)
 # Part Number: GW1NR-LV9QN88C6/I5
 # Device: GW1NR-9C
-# Project: Tang Nano 9K HDMI Video
+# Project: Tang Nano 9K HDMI Video + Audio
 # Updated: 2025-10-13
 
 # ===== PRIMARY CLOCKS =====
@@ -45,6 +45,28 @@ set_false_path -to [get_ports {tmds_data_p[*]}]
 set_false_path -to [get_ports {tmds_data_n[*]}]
 set_false_path -to [get_ports {tmds_clk_p}]
 set_false_path -to [get_ports {tmds_clk_n}]
+
+# ===== AUDIO PATH CONSTRAINTS =====
+# Audio clock enable (audio_ce) is derived from the pixel clock through division.
+# The audio_ce_gen module uses a counter to generate a 48 kHz enable pulse.
+# The external audio toggle signal (if used) crosses clock domains and is
+# synchronized with a 2-stage synchronizer.
+#
+# Mark CDC synchronizer paths as false paths (by design):
+# set_false_path -from [get_pins {audio_ce_generator/ext_toggle_sync1/Q}]
+# set_false_path -from [get_pins {audio_ce_generator/ext_toggle_sync2/Q}]
+#
+# Note: The above paths may not exist in the netlist if synthesis optimizes them
+# away when ext_audio_toggle is tied to '0'. The Gowin tools will ignore these
+# constraints if the paths don't exist.
+
+# Audio debug outputs don't need tight timing (for observation only)
+# set_false_path -from [get_pins {hdmi_encoder_inst/dbg_audio_tx_cnt_reg[*]/Q}]
+# set_false_path -from [get_pins {hdmi_encoder_inst/dbg_island_active_reg/Q}]
+# set_false_path -from [get_pins {hdmi_encoder_inst/dbg_packet_type_reg[*]/Q}]
+#
+# Note: Debug signals are internal and don't drive output ports in current design.
+# These constraints are commented out but documented for reference.
 
 # ===== CLOCK DOMAIN RELATIONSHIPS =====
 # The pixel clock (25.2 MHz) and serial clock (126 MHz) are synchronous - both

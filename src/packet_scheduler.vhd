@@ -120,7 +120,38 @@ architecture rtl of packet_scheduler is
     --------------------------------------------------------------------------------
     type packet_t is (PKT_NONE, PKT_ACR, PKT_ASP, PKT_AIF, PKT_AVI);
     signal selected_packet : packet_t;
+    signal pending_packet  : packet_t;
     signal infoframe_toggle : std_logic;  -- Alternates between AIF and AVI
+    signal pending_valid   : std_logic;
+    signal pending_accept  : std_logic;
+
+    function choose_packet(
+        info_toggle : std_logic;
+        acr_req     : std_logic;
+        acr_val     : std_logic;
+        asp_val     : std_logic;
+        aif_req     : std_logic;
+        aif_val     : std_logic;
+        avi_req     : std_logic;
+        avi_val     : std_logic
+    ) return packet_t is
+    begin
+        if acr_req = '1' and acr_val = '1' then
+            return PKT_ACR;
+        elsif asp_val = '1' then
+            return PKT_ASP;
+        elsif info_toggle = '0' and aif_req = '1' and aif_val = '1' then
+            return PKT_AIF;
+        elsif info_toggle = '1' and avi_req = '1' and avi_val = '1' then
+            return PKT_AVI;
+        elsif aif_req = '1' and aif_val = '1' then
+            return PKT_AIF;
+        elsif avi_req = '1' and avi_val = '1' then
+            return PKT_AVI;
+        else
+            return PKT_NONE;
+        end if;
+    end function choose_packet;
     
     --------------------------------------------------------------------------------
     -- Timing Counters
@@ -192,42 +223,48 @@ begin
     -- Packet Arbitration (Priority: ACR > ASP > AIF/AVI round-robin)
     --------------------------------------------------------------------------------
     packet_arbiter: process(clk_pixel, rst_n)
+        variable choice          : packet_t;
+        variable accepted_packet : packet_t;
     begin
         if rst_n = '0' then
-            selected_packet <= PKT_NONE;
+            pending_packet  <= PKT_NONE;
+            pending_valid   <= '0';
             infoframe_toggle <= '0';
-            
         elsif rising_edge(clk_pixel) then
-            
-            -- Arbitrate only when idle and in back porch
-            if state = ST_IDLE and in_back_porch = '1' then
-                
-                -- Priority 1: ACR (highest priority, clock regeneration critical)
-                if acr_request = '1' and acr_valid = '1' then
-                    selected_packet <= PKT_ACR;
-                    
-                -- Priority 2: ASP (audio samples, time-sensitive)
-                elsif asp_valid = '1' then
-                    selected_packet <= PKT_ASP;
-                    
-                -- Priority 3: InfoFrames (AIF/AVI alternate)
-                elsif aif_request = '1' and aif_valid = '1' and infoframe_toggle = '0' then
-                    selected_packet <= PKT_AIF;
-                    infoframe_toggle <= '1';  -- Next time try AVI
-                    
-                elsif avi_request = '1' and avi_valid = '1' and infoframe_toggle = '1' then
-                    selected_packet <= PKT_AVI;
-                    infoframe_toggle <= '0';  -- Next time try AIF
-                    
-                else
-                    selected_packet <= PKT_NONE;
+
+            if pending_accept = '1' then
+                accepted_packet := pending_packet;
+                pending_packet  <= PKT_NONE;
+                pending_valid   <= '0';
+
+                if accepted_packet = PKT_AIF then
+                    infoframe_toggle <= '1';
+                elsif accepted_packet = PKT_AVI then
+                    infoframe_toggle <= '0';
                 end if;
-                
-            elsif state = ST_GUARD_TRAILING then
-                -- Clear selection after packet transmission
-                selected_packet <= PKT_NONE;
+
+            elsif state = ST_IDLE and in_back_porch = '1' and pending_valid = '0' then
+                choice := choose_packet(
+                    infoframe_toggle,
+                    acr_request,
+                    acr_valid,
+                    asp_valid,
+                    aif_request,
+                    aif_valid,
+                    avi_request,
+                    avi_valid
+                );
+
+                if choice /= PKT_NONE then
+                    pending_packet <= choice;
+                    pending_valid  <= '1';
+                end if;
+
+            elsif state = ST_IDLE and in_back_porch = '0' then
+                pending_packet <= PKT_NONE;
+                pending_valid  <= '0';
             end if;
-            
+
         end if;
     end process packet_arbiter;
     
@@ -243,6 +280,8 @@ begin
             asp_ready_reg <= '0';
             aif_ready_reg <= '0';
             avi_ready_reg <= '0';
+            selected_packet <= PKT_NONE;
+            pending_accept <= '0';
             
             island_active_pipe1 <= '0';
             island_active_pipe2 <= '0';
@@ -258,6 +297,7 @@ begin
             asp_ready_reg <= '0';
             aif_ready_reg <= '0';
             avi_ready_reg <= '0';
+            pending_accept <= '0';
             
             case state is
                 
@@ -269,10 +309,14 @@ begin
                     preamble_active_pipe1 <= '0';
                     guard_band_pipe1 <= '0';
                     
-                    if in_back_porch = '1' and selected_packet /= PKT_NONE then
+                    if in_back_porch = '1' and pending_valid = '1' and pending_packet /= PKT_NONE then
                         -- Start packet transmission
                         state <= ST_PREAMBLE;
                         pixel_counter <= (others => '0');
+                        selected_packet <= pending_packet;
+                        pending_accept <= '1';
+                    else
+                        selected_packet <= PKT_NONE;
                     end if;
                 
                 --------------------------------------------------------------------
@@ -342,6 +386,7 @@ begin
                     if pixel_counter = GUARD_LENGTH - 1 then
                         state <= ST_IDLE;
                         pixel_counter <= (others => '0');
+                        selected_packet <= PKT_NONE;
                     end if;
                 
                 when others =>
