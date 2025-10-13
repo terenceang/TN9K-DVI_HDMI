@@ -84,9 +84,9 @@ begin
     -- Color Bar Pattern Generation (8-Bar Standard Pattern)
     --------------------------------------------------------------------------------
     -- Generates standard SMPTE color bars: White, Yellow, Cyan, Green, Magenta, Red, Blue, Black
-    -- Uses bit slicing (640/8 = 80 pixels per bar)
+    -- Each bar is exactly 80 pixels wide (640/8 = 80)
     color_pattern_generator: process(clk_pixel, rst_n)
-        variable color_bar_index : std_logic_vector(2 downto 0);
+        variable bar_index : integer range 0 to 7;
     begin
         if rst_n = '0' then
             r <= (others => '0');
@@ -94,42 +94,48 @@ begin
             b <= (others => '0');
         elsif rising_edge(clk_pixel) then
             if de = '1' then
-                -- Extract bits 9:7 from h_count for bar selection (640/8 = 80 pixels per bar)
-                -- h_count range: 0-639, divided into 8 bars of 80 pixels each
-                color_bar_index := std_logic_vector(h_count(9 downto 7));
+                -- Calculate bar index: 0-7 based on horizontal position
+                -- Divide h_count by 80 to get bar number (0-7)
+                -- h_count: 0-79 → bar 0, 80-159 → bar 1, ..., 560-639 → bar 7
+                bar_index := to_integer(h_count(9 downto 0)) / 80;
+                
+                -- Clamp to valid range (defensive programming)
+                if bar_index > 7 then
+                    bar_index := 7;
+                end if;
 
-                -- Generate 8-color bar pattern with explicit case statement for clarity
-                -- Standard color bar pattern (left to right):
-                case color_bar_index is
-                    when "000" =>  -- Bar 0: White (R=1, G=1, B=1)
+                -- Generate 8-color bar pattern with explicit case statement
+                -- Standard SMPTE color bar pattern (left to right):
+                case bar_index is
+                    when 0 =>  -- Bar 0 (0-79): White (R=1, G=1, B=1)
                         r <= x"FF";
                         g <= x"FF";
                         b <= x"FF";
-                    when "001" =>  -- Bar 1: Yellow (R=1, G=1, B=0)
+                    when 1 =>  -- Bar 1 (80-159): Yellow (R=1, G=1, B=0)
                         r <= x"FF";
                         g <= x"FF";
                         b <= x"00";
-                    when "010" =>  -- Bar 2: Cyan (R=0, G=1, B=1)
+                    when 2 =>  -- Bar 2 (160-239): Cyan (R=0, G=1, B=1)
                         r <= x"00";
                         g <= x"FF";
                         b <= x"FF";
-                    when "011" =>  -- Bar 3: Green (R=0, G=1, B=0)
+                    when 3 =>  -- Bar 3 (240-319): Green (R=0, G=1, B=0)
                         r <= x"00";
                         g <= x"FF";
                         b <= x"00";
-                    when "100" =>  -- Bar 4: Magenta (R=1, G=0, B=1)
+                    when 4 =>  -- Bar 4 (320-399): Magenta (R=1, G=0, B=1)
                         r <= x"FF";
                         g <= x"00";
                         b <= x"FF";
-                    when "101" =>  -- Bar 5: Red (R=1, G=0, B=0)
+                    when 5 =>  -- Bar 5 (400-479): Red (R=1, G=0, B=0)
                         r <= x"FF";
                         g <= x"00";
                         b <= x"00";
-                    when "110" =>  -- Bar 6: Blue (R=0, G=0, B=1)
+                    when 6 =>  -- Bar 6 (480-559): Blue (R=0, G=0, B=1)
                         r <= x"00";
                         g <= x"00";
                         b <= x"FF";
-                    when "111" =>  -- Bar 7: Black (R=0, G=0, B=0)
+                    when 7 =>  -- Bar 7 (560-639): Black (R=0, G=0, B=0)
                         r <= x"00";
                         g <= x"00";
                         b <= x"00";

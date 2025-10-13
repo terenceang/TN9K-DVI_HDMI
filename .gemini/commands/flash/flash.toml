@@ -1,5 +1,5 @@
-description = "Flashes the bitstream to Flash (permanent)."
+description = "Flashes the bitstream to SRAM (temporary, fast for testing)."
 prompt = """
-Flashing to Flash...
-!{\"C:\\Gowin\\Gowin_V1.9.12_x64\\Programmer\\bin\\programmer_cli.exe\" --device GW1NR-9C --run 5 --fsFile \"impl\\pnr\\TN9K_HDMI_Video.fs\" --cable-index 1}
+Flashing to SRAM (temporary)...
+!{\"C:\\Gowin\\Gowin_V1.9.12_x64\\Programmer\\bin\\programmer_cli.exe\" --device GW1NR-9C --run 2 --fsFile \"impl\\pnr\\TN9K_HDMI_Video.fs\" --cable-index 1}
 """
