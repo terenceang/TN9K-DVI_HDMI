@@ -60,10 +60,6 @@ This will write the design to the onboard Flash memory. The FPGA will automatica
 
 For a detailed explanation of the HDMI protocol, TMDS encoding, and the VHDL architecture, please see the [Technical Reference](./docs/TECHNICAL_REFERENCE.md).
 
-## Troubleshooting
-
-If you encounter any issues, please refer to the [Troubleshooting Guide](./TROUBLESHOOTING.md).
-
 ## License
 
 This project is open-source and available under the MIT License. See the `LICENSE` file for more details.

@@ -1,0 +1,5 @@
+description = "Builds the project using the TCL script."
+prompt = """
+Building project...
+!{\"C:\\Gowin\\Gowin_V1.9.12_x64\\IDE\\bin\\gw_sh.exe\" build.tcl}
+"""
