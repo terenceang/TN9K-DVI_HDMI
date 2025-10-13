@@ -81,9 +81,10 @@ begin
     vsync <= vertical_sync;
 
     --------------------------------------------------------------------------------
-    -- Color Bar Pattern Generation (OPTIMIZED - Registered)
+    -- Color Bar Pattern Generation (8-Bar Standard Pattern)
     --------------------------------------------------------------------------------
-    -- Uses bit slicing instead of division for better resource usage
+    -- Generates standard SMPTE color bars: White, Yellow, Cyan, Green, Magenta, Red, Blue, Black
+    -- Uses bit slicing (640/8 = 80 pixels per bar)
     color_pattern_generator: process(clk_pixel, rst_n)
         variable color_bar_index : std_logic_vector(2 downto 0);
     begin
@@ -94,16 +95,49 @@ begin
         elsif rising_edge(clk_pixel) then
             if de = '1' then
                 -- Extract bits 9:7 from h_count for bar selection (640/8 = 80 pixels per bar)
-                -- This is equivalent to dividing by 80 but uses only bit slicing
+                -- h_count range: 0-639, divided into 8 bars of 80 pixels each
                 color_bar_index := std_logic_vector(h_count(9 downto 7));
 
-                -- Optimized color generation using color_bar_index directly
-                -- Each bar is defined by which bits are set
-                -- bar(2) controls Red, bar(1) controls Green, bar(0) controls Blue
-                -- Inverted logic to match expected pattern (White to Black gradient)
-                r <= (others => not color_bar_index(2));
-                g <= (others => not color_bar_index(1));
-                b <= (others => not color_bar_index(0));
+                -- Generate 8-color bar pattern with explicit case statement for clarity
+                -- Standard color bar pattern (left to right):
+                case color_bar_index is
+                    when "000" =>  -- Bar 0: White (R=1, G=1, B=1)
+                        r <= x"FF";
+                        g <= x"FF";
+                        b <= x"FF";
+                    when "001" =>  -- Bar 1: Yellow (R=1, G=1, B=0)
+                        r <= x"FF";
+                        g <= x"FF";
+                        b <= x"00";
+                    when "010" =>  -- Bar 2: Cyan (R=0, G=1, B=1)
+                        r <= x"00";
+                        g <= x"FF";
+                        b <= x"FF";
+                    when "011" =>  -- Bar 3: Green (R=0, G=1, B=0)
+                        r <= x"00";
+                        g <= x"FF";
+                        b <= x"00";
+                    when "100" =>  -- Bar 4: Magenta (R=1, G=0, B=1)
+                        r <= x"FF";
+                        g <= x"00";
+                        b <= x"FF";
+                    when "101" =>  -- Bar 5: Red (R=1, G=0, B=0)
+                        r <= x"FF";
+                        g <= x"00";
+                        b <= x"00";
+                    when "110" =>  -- Bar 6: Blue (R=0, G=0, B=1)
+                        r <= x"00";
+                        g <= x"00";
+                        b <= x"FF";
+                    when "111" =>  -- Bar 7: Black (R=0, G=0, B=0)
+                        r <= x"00";
+                        g <= x"00";
+                        b <= x"00";
+                    when others =>
+                        r <= x"00";
+                        g <= x"00";
+                        b <= x"00";
+                end case;
             else
                 -- Blanking period - all channels to zero
                 r <= x"00";
