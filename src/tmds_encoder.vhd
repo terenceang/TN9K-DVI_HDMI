@@ -162,59 +162,54 @@ end tmds_encoder;
 architecture rtl of tmds_encoder is
 
     ----------------------------------------------------------------------------
-    -- Helper Function: Count Number of '1' Bits
+    -- Helper Function: Count Number of '1' Bits (Optimized)
     ----------------------------------------------------------------------------
     -- Used to count the number of set bits in the input data, which determines
     -- whether to use XOR or XNOR encoding in the transition minimization stage.
-    function count_ones(bits : std_logic_vector(7 downto 0)) return integer is
-        variable count : integer := 0;
+    -- Optimized: Uses tree-based addition for better synthesis
+    function count_ones(bits : std_logic_vector(7 downto 0)) return unsigned is
+        variable sum : unsigned(3 downto 0);
     begin
-        for i in 0 to 7 loop
-            if bits(i) = '1' then
-                count := count + 1;
-            end if;
-        end loop;
-        return count;
+        -- Tree-based parallel addition (more efficient than loop)
+        sum := ("000" & bits(0)) + ("000" & bits(1)) + ("000" & bits(2)) + ("000" & bits(3)) +
+               ("000" & bits(4)) + ("000" & bits(5)) + ("000" & bits(6)) + ("000" & bits(7));
+        return sum;
     end function;
 
     ----------------------------------------------------------------------------
     -- Stage 1 Signals: Transition Minimization
     ----------------------------------------------------------------------------
-    signal q_m        : std_logic_vector(8 downto 0); -- 9-bit intermediate encoding
-                                                       -- q_m(7:0) = encoded data
-                                                       -- q_m(8) = encoding method flag
+    signal encoded_intermediate : std_logic_vector(8 downto 0); -- 9-bit intermediate encoding
+                                                       -- encoded_intermediate(7:0) = encoded data
+                                                       -- encoded_intermediate(8) = encoding method flag
                                                        --   '1' = XOR was used
                                                        --   '0' = XNOR was used
 
     ----------------------------------------------------------------------------
     -- Stage 2 Signals: DC Balance and Output
     ----------------------------------------------------------------------------
-    signal q_out      : std_logic_vector(9 downto 0); -- Output register (was first stage, now only stage)
-    signal q_out_next : std_logic_vector(9 downto 0); -- Combinational next output value
-    -- REMOVED dout_buf: Was causing 2-cycle latency that broke data island timing
+    signal output_register      : std_logic_vector(9 downto 0); -- Output register
+    signal output_next          : std_logic_vector(9 downto 0); -- Combinational next output value
 
     ----------------------------------------------------------------------------
-    -- DC Balance Tracking (Running Disparity)
+    -- DC Balance Tracking (Running Disparity) - Optimized to 6 bits
     ----------------------------------------------------------------------------
-    signal cnt        : signed(7 downto 0);            -- Current disparity counter
+    -- 6 bits is sufficient for TMDS disparity tracking (range -32 to +31)
+    signal disparity_counter     : signed(5 downto 0);            -- Current disparity counter
                                                        -- Tracks cumulative (1s - 0s) sent
                                                        -- Positive = more 1s sent
                                                        -- Negative = more 0s sent
                                                        -- Zero = perfectly balanced
 
-    signal cnt_next   : signed(7 downto 0);            -- Next disparity value
-    signal cnt_tmp    : signed(7 downto 0);            -- Temporary disparity calculation
-    
-    -- Track previous signals to detect transitions
-    signal data_island_prev : std_logic := '0';        -- Previous state of data_island signal
-    signal de_prev          : std_logic := '0';        -- Previous state of de signal
+    signal disparity_next        : signed(5 downto 0);            -- Next disparity value
+    signal disparity_temp        : signed(5 downto 0);            -- Temporary disparity calculation
 
     ----------------------------------------------------------------------------
-    -- Bit Count Signals
+    -- Bit Count Signals (Optimized to use smaller unsigned)
     ----------------------------------------------------------------------------
-    signal n1_d       : integer range 0 to 8;          -- Number of 1s in input din(7:0)
-    signal n0_q_m     : integer range 0 to 8;          -- Number of 0s in q_m(7:0)
-    signal n1_q_m     : integer range 0 to 8;          -- Number of 1s in q_m(7:0)
+    signal ones_count_input      : unsigned(3 downto 0);          -- Number of 1s in input din(7:0)
+    signal zeros_count_encoded   : unsigned(3 downto 0);          -- Number of 0s in encoded_intermediate(7:0)
+    signal ones_count_encoded    : unsigned(3 downto 0);          -- Number of 1s in encoded_intermediate(7:0)
 
     -- TMDS Control Codes (DVI 1.0 Specification, Table 3-5)
     constant TMDS_CTRL_00 : std_logic_vector(9 downto 0) := "1101010100"; -- HSYNC=0, VSYNC=0
@@ -247,7 +242,7 @@ begin
     ----------------------------------------------------------------------------
     -- This is used to determine whether XOR or XNOR encoding will produce
     -- fewer transitions in Stage 1 of the encoding process.
-    n1_d <= count_ones(din);
+    ones_count_input <= count_ones(din);
 
     ----------------------------------------------------------------------------
     -- Main TMDS Encoding Process
@@ -255,27 +250,18 @@ begin
     -- This process implements the complete two-stage TMDS encoding algorithm:
     -- 1. Transition minimization (XOR vs XNOR decision)
     -- 2. DC balance correction with running disparity tracking
-    --
-    -- The process is fully synchronous and includes two pipeline stages at
-    -- the output (q_out -> dout_buf -> dout) for improved timing performance.
-    process(clk, rst_n)
-        variable q_m_temp : std_logic_vector(8 downto 0);  -- Temporary for q_m calculation
-        variable n0_q_m_var : integer range 0 to 8;         -- Combinational count of 0s
-        variable n1_q_m_var : integer range 0 to 8;         -- Combinational count of 1s
+    tmds_encoding_process: process(clk, rst_n)
+        variable encoded_temp         : std_logic_vector(8 downto 0);  -- Temporary for encoding calculation
+        variable zeros_count_var      : unsigned(3 downto 0);          -- Combinational count of 0s
+        variable ones_count_var       : unsigned(3 downto 0);          -- Combinational count of 1s
     begin
         if rst_n = '0' then
             -- Asynchronous reset: Clear all registers
-            cnt <= (others => '0');      -- Reset disparity counter
-            q_out <= (others => '0');    -- Clear output register
-            dout <= (others => '0');     -- Clear final output
-            data_island_prev <= '0';     -- Clear previous state tracker
-            de_prev <= '0';              -- Clear de tracker
+            disparity_counter <= (others => '0');      -- Reset disparity counter
+            output_register   <= (others => '0');      -- Clear output register
+            dout              <= (others => '0');      -- Clear final output
 
         elsif rising_edge(clk) then
-        
-            -- Track previous signal states (kept for potential future diagnostics)
-            data_island_prev <= data_island;
-            de_prev <= de;
             
             -- PERMANENT DC BALANCE FIX: Never reset cnt
             -- Per DC_BALANCE_FIX.md: cnt must maintain continuity across all modes
@@ -307,48 +293,47 @@ begin
                 -- to eliminate the 1-cycle delay that was causing timing corruption
 
                 case data_in is
-                    when "0000" => q_out <= "1010011100"; dout <= "1010011100";
-                    when "0001" => q_out <= "1001100011"; dout <= "1001100011";
-                    when "0010" => q_out <= "1011100100"; dout <= "1011100100";
-                    when "0011" => q_out <= "1011100010"; dout <= "1011100010";
-                    when "0100" => q_out <= "0101110001"; dout <= "0101110001";
-                    when "0101" => q_out <= "0100011110"; dout <= "0100011110";
-                    when "0110" => q_out <= "0110001110"; dout <= "0110001110";
-                    when "0111" => q_out <= "0100111100"; dout <= "0100111100";
-                    when "1000" => q_out <= "1011001100"; dout <= "1011001100";
-                    when "1001" => q_out <= "0100111001"; dout <= "0100111001";
-                    when "1010" => q_out <= "0110011100"; dout <= "0110011100";
-                    when "1011" => q_out <= "1011000110"; dout <= "1011000110";
-                    when "1100" => q_out <= "1010001110"; dout <= "1010001110";
-                    when "1101" => q_out <= "1001110001"; dout <= "1001110001";
-                    when "1110" => q_out <= "0101100011"; dout <= "0101100011";
-                    when "1111" => q_out <= "1011000011"; dout <= "1011000011";
-                    when others => q_out <= "1010011100"; dout <= "1010011100";
+                    when "0000" => output_register <= "1010011100"; dout <= "1010011100";
+                    when "0001" => output_register <= "1001100011"; dout <= "1001100011";
+                    when "0010" => output_register <= "1011100100"; dout <= "1011100100";
+                    when "0011" => output_register <= "1011100010"; dout <= "1011100010";
+                    when "0100" => output_register <= "0101110001"; dout <= "0101110001";
+                    when "0101" => output_register <= "0100011110"; dout <= "0100011110";
+                    when "0110" => output_register <= "0110001110"; dout <= "0110001110";
+                    when "0111" => output_register <= "0100111100"; dout <= "0100111100";
+                    when "1000" => output_register <= "1011001100"; dout <= "1011001100";
+                    when "1001" => output_register <= "0100111001"; dout <= "0100111001";
+                    when "1010" => output_register <= "0110011100"; dout <= "0110011100";
+                    when "1011" => output_register <= "1011000110"; dout <= "1011000110";
+                    when "1100" => output_register <= "1010001110"; dout <= "1010001110";
+                    when "1101" => output_register <= "1001110001"; dout <= "1001110001";
+                    when "1110" => output_register <= "0101100011"; dout <= "0101100011";
+                    when "1111" => output_register <= "1011000011"; dout <= "1011000011";
+                    when others => output_register <= "1010011100"; dout <= "1010011100";
                 end case;
-                -- cnt is NOT modified - maintains DC balance from previous video period
+                -- disparity_counter is NOT modified - maintains DC balance from previous video period
 
             elsif de = '0' then
-                -- Control period: DO NOT reset cnt anymore
+                -- Control period: DO NOT reset disparity_counter anymore
                 -- This was causing DC balance loss when transitioning to/from data islands
-                -- cnt <= (others => '0');  -- REMOVED: was breaking DC balance continuity
                 --
-                -- ZERO-CYCLE LATENCY FIX: Assign both q_out AND dout in same cycle
+                -- ZERO-CYCLE LATENCY FIX: Assign both output_register AND dout in same cycle
 
                 case ctrl is
                     -- HSYNC=0, VSYNC=0: Pattern has 5 zeros, 5 ones (balanced)
-                    when "00"   => q_out <= "1101010100"; dout <= "1101010100";
+                    when "00"   => output_register <= "1101010100"; dout <= "1101010100";
 
                     -- HSYNC=1, VSYNC=0: Pattern has 5 zeros, 5 ones (balanced)
-                    when "01"   => q_out <= "0010101011"; dout <= "0010101011";
+                    when "01"   => output_register <= "0010101011"; dout <= "0010101011";
 
                     -- HSYNC=0, VSYNC=1: Pattern has 5 zeros, 5 ones (balanced)
-                    when "10"   => q_out <= "0101010100"; dout <= "0101010100";
+                    when "10"   => output_register <= "0101010100"; dout <= "0101010100";
 
                     -- HSYNC=1, VSYNC=1: Pattern has 5 zeros, 5 ones (balanced)
-                    when "11"   => q_out <= "1010101011"; dout <= "1010101011";
+                    when "11"   => output_register <= "1010101011"; dout <= "1010101011";
 
                     -- Default to ctrl="00" pattern for safety
-                    when others => q_out <= "1101010100"; dout <= "1101010100";
+                    when others => output_register <= "1101010100"; dout <= "1101010100";
                 end case;
 
             else
@@ -361,164 +346,116 @@ begin
                 ----------------------------------------------------------------
                 -- Goal: Reduce the number of transitions (0->1 or 1->0) to
                 -- minimize EMI and high-frequency content.
-                --
-                -- Strategy: Choose between XOR and XNOR encoding based on the
-                -- number of 1s in the input byte:
-                --   - If input has many 1s (n1_d > 4), use XNOR (inverted logic)
-                --   - If input has few 1s (n1_d < 4), use XOR (normal logic)
-                --   - If balanced (n1_d = 4), decide based on din(0)
-                --
-                -- The 9th bit (q_m(8)) indicates which method was used:
-                --   q_m(8) = '0' means XNOR was used (fewer transitions)
-                --   q_m(8) = '1' means XOR was used (more transitions)
 
-                if (n1_d > 4) or ((n1_d = 4) and (din(0) = '0')) then
+                if (ones_count_input > 4) or ((ones_count_input = 4) and (din(0) = '0')) then
                     -- Use XNOR encoding (produces fewer transitions)
-                    -- Each bit is the XNOR of the previous encoded bit and
-                    -- the next input bit, creating a more stable signal
-                    q_m_temp(0) := din(0);
-                    q_m_temp(1) := q_m_temp(0) xnor din(1);
-                    q_m_temp(2) := q_m_temp(1) xnor din(2);
-                    q_m_temp(3) := q_m_temp(2) xnor din(3);
-                    q_m_temp(4) := q_m_temp(3) xnor din(4);
-                    q_m_temp(5) := q_m_temp(4) xnor din(5);
-                    q_m_temp(6) := q_m_temp(5) xnor din(6);
-                    q_m_temp(7) := q_m_temp(6) xnor din(7);
-                    q_m_temp(8) := '0';  -- Flag indicating XNOR encoding
+                    encoded_temp(0) := din(0);
+                    encoded_temp(1) := encoded_temp(0) xnor din(1);
+                    encoded_temp(2) := encoded_temp(1) xnor din(2);
+                    encoded_temp(3) := encoded_temp(2) xnor din(3);
+                    encoded_temp(4) := encoded_temp(3) xnor din(4);
+                    encoded_temp(5) := encoded_temp(4) xnor din(5);
+                    encoded_temp(6) := encoded_temp(5) xnor din(6);
+                    encoded_temp(7) := encoded_temp(6) xnor din(7);
+                    encoded_temp(8) := '0';  -- Flag indicating XNOR encoding
                 else
                     -- Use XOR encoding (produces more transitions when needed)
-                    -- Each bit is the XOR of the previous encoded bit and
-                    -- the next input bit
-                    q_m_temp(0) := din(0);
-                    q_m_temp(1) := q_m_temp(0) xor din(1);
-                    q_m_temp(2) := q_m_temp(1) xor din(2);
-                    q_m_temp(3) := q_m_temp(2) xor din(3);
-                    q_m_temp(4) := q_m_temp(3) xor din(4);
-                    q_m_temp(5) := q_m_temp(4) xor din(5);
-                    q_m_temp(6) := q_m_temp(5) xor din(6);
-                    q_m_temp(7) := q_m_temp(6) xor din(7);
-                    q_m_temp(8) := '1';  -- Flag indicating XOR encoding
+                    encoded_temp(0) := din(0);
+                    encoded_temp(1) := encoded_temp(0) xor din(1);
+                    encoded_temp(2) := encoded_temp(1) xor din(2);
+                    encoded_temp(3) := encoded_temp(2) xor din(3);
+                    encoded_temp(4) := encoded_temp(3) xor din(4);
+                    encoded_temp(5) := encoded_temp(4) xor din(5);
+                    encoded_temp(6) := encoded_temp(5) xor din(6);
+                    encoded_temp(7) := encoded_temp(6) xor din(7);
+                    encoded_temp(8) := '1';  -- Flag indicating XOR encoding
                 end if;
 
                 -- Register the 9-bit encoded result
-                q_m <= q_m_temp;
+                encoded_intermediate <= encoded_temp;
 
                 ----------------------------------------------------------------
-                -- Count 1s and 0s in the 8-bit encoded data
+                -- Count 1s and 0s in the 8-bit encoded data (Optimized)
                 ----------------------------------------------------------------
-                -- These counts are used in Stage 2 to determine how to adjust
-                -- the DC balance. We need to know if the current symbol has
-                -- more 1s or 0s so we can decide whether to invert it.
-                -- IMPORTANT: Use variables here to calculate counts combinationally
-                -- in the same cycle, not registered signals from previous cycle!
-                n0_q_m_var := 8 - count_ones(q_m_temp(7 downto 0));  -- Count of 0s
-                n1_q_m_var := count_ones(q_m_temp(7 downto 0));      -- Count of 1s
+                zeros_count_var := "1000" - count_ones(encoded_temp(7 downto 0));  -- 8 - n1
+                ones_count_var := count_ones(encoded_temp(7 downto 0));
 
                 ----------------------------------------------------------------
                 -- STAGE 2: DC Balance Correction
                 ----------------------------------------------------------------
                 -- Goal: Maintain roughly equal numbers of 1s and 0s over time
                 -- to prevent DC bias on the transmission line.
-                --
-                -- Strategy: Use the running disparity counter 'cnt' to track
-                -- the cumulative imbalance, then decide whether to send the
-                -- encoded data as-is or inverted to correct the imbalance.
-                --
-                -- The 10th bit (dout(9)) indicates whether inversion occurred:
-                --   dout(9) = '0' means data is not inverted
-                --   dout(9) = '1' means data is inverted
-                -- The 9th bit (dout(8)) is copied from q_m(8) to indicate
-                -- which encoding method was used in Stage 1.
 
                 ----------------------------------------------------------------
                 -- Case 1: Disparity is Zero or Balanced
                 ----------------------------------------------------------------
-                -- If the disparity counter is zero, or if the current symbol
-                -- is balanced (equal 1s and 0s), then make a simple decision
-                -- based on the q_m(8) flag from Stage 1.
-                if (cnt = 0) or (n1_q_m_var = n0_q_m_var) then
-                    q_out_next(9) <= not q_m_temp(8);  -- Inversion flag
-                    q_out_next(8) <= q_m_temp(8);      -- Encoding method flag
+                if (disparity_counter = 0) or (ones_count_var = zeros_count_var) then
+                    output_next(9) <= not encoded_temp(8);  -- Inversion flag
+                    output_next(8) <= encoded_temp(8);      -- Encoding method flag
 
-                    if q_m_temp(8) = '1' then
+                    if encoded_temp(8) = '1' then
                         -- XOR was used: Keep data as-is
-                        q_out_next(7 downto 0) <= q_m_temp(7 downto 0);
-                        -- Update disparity: add (n1_q_m_var - n0_q_m_var)
-                        cnt_next <= cnt + to_signed(n1_q_m_var - n0_q_m_var, 8);
+                        output_next(7 downto 0) <= encoded_temp(7 downto 0);
+                        -- Update disparity: add (ones_count_var - zeros_count_var)
+                        disparity_next <= disparity_counter + signed(resize(ones_count_var - zeros_count_var, 6));
                     else
                         -- XNOR was used: Invert data
-                        q_out_next(7 downto 0) <= not q_m_temp(7 downto 0);
-                        -- Update disparity: add (n0_q_m_var - n1_q_m_var) because we inverted
-                        cnt_next <= cnt + to_signed(n0_q_m_var - n1_q_m_var, 8);
+                        output_next(7 downto 0) <= not encoded_temp(7 downto 0);
+                        -- Update disparity: add (zeros_count_var - ones_count_var) because we inverted
+                        disparity_next <= disparity_counter + signed(resize(zeros_count_var - ones_count_var, 6));
                     end if;
 
                 ----------------------------------------------------------------
                 -- Case 2: Imbalance Would Worsen
                 ----------------------------------------------------------------
-                -- If sending this symbol as-is would make the existing
-                -- imbalance worse, then invert the data to help correct it.
-                --
-                -- This happens when:
-                --   (cnt > 0 and n1_q_m > n0_q_m) - Too many 1s and symbol has more 1s
-                --   OR
-                --   (cnt < 0 and n0_q_m > n1_q_m) - Too many 0s and symbol has more 0s
-                elsif ((cnt > 0) and (n1_q_m_var > n0_q_m_var)) or ((cnt < 0) and (n0_q_m_var > n1_q_m_var)) then
-                    q_out_next(9) <= '1';              -- Indicate inversion
-                    q_out_next(8) <= q_m_temp(8);      -- Copy encoding method flag
-                    q_out_next(7 downto 0) <= not q_m_temp(7 downto 0);  -- Invert data
+                elsif ((disparity_counter > 0) and (ones_count_var > zeros_count_var)) or 
+                      ((disparity_counter < 0) and (zeros_count_var > ones_count_var)) then
+                    output_next(9) <= '1';              -- Indicate inversion
+                    output_next(8) <= encoded_temp(8);      -- Copy encoding method flag
+                    output_next(7 downto 0) <= not encoded_temp(7 downto 0);  -- Invert data
 
                     -- Update disparity
-                    -- Base adjustment: (n0_q_m_var - n1_q_m_var) because we inverted
-                    cnt_tmp <= cnt + to_signed(n0_q_m_var - n1_q_m_var, 8);
+                    disparity_temp <= disparity_counter + signed(resize(zeros_count_var - ones_count_var, 6));
 
-                    -- Additional adjustment based on q_m(8):
-                    -- If q_m(8) = '1' (XOR), add 2 to compensate for bit 8 and bit 9
-                    -- If q_m(8) = '0' (XNOR), no extra adjustment
-                    if q_m_temp(8) = '1' then
-                        cnt_next <= cnt_tmp + 2;
+                    -- Additional adjustment based on encoding method
+                    if encoded_temp(8) = '1' then
+                        disparity_next <= disparity_temp + 2;
                     else
-                        cnt_next <= cnt_tmp;
+                        disparity_next <= disparity_temp;
                     end if;
 
                 ----------------------------------------------------------------
                 -- Case 3: Imbalance Would Improve or Stay Same
                 ----------------------------------------------------------------
-                -- If sending this symbol as-is would improve the imbalance
-                -- or keep it the same, then send it without inversion.
                 else
-                    q_out_next(9) <= '0';              -- No inversion
-                    q_out_next(8) <= q_m_temp(8);      -- Copy encoding method flag
-                    q_out_next(7 downto 0) <= q_m_temp(7 downto 0);  -- Keep data as-is
+                    output_next(9) <= '0';              -- No inversion
+                    output_next(8) <= encoded_temp(8);      -- Copy encoding method flag
+                    output_next(7 downto 0) <= encoded_temp(7 downto 0);  -- Keep data as-is
 
                     -- Update disparity
-                    -- Base adjustment: (n1_q_m_var - n0_q_m_var) because we didn't invert
-                    cnt_tmp <= cnt + to_signed(n1_q_m_var - n0_q_m_var, 8);
+                    disparity_temp <= disparity_counter + signed(resize(ones_count_var - zeros_count_var, 6));
 
-                    -- Additional adjustment based on q_m(8):
-                    -- If q_m(8) = '1' (XOR), no extra adjustment
-                    -- If q_m(8) = '0' (XNOR), subtract 2 to compensate for bit 8 and bit 9
-                    if q_m_temp(8) = '1' then
-                        cnt_next <= cnt_tmp;
+                    -- Additional adjustment based on encoding method
+                    if encoded_temp(8) = '1' then
+                        disparity_next <= disparity_temp;
                     else
-                        cnt_next <= cnt_tmp - 2;
+                        disparity_next <= disparity_temp - 2;
                     end if;
                 end if;
 
                 -- Register the updated disparity counter and output
-                cnt <= cnt_next;
-                q_out <= q_out_next;
+                disparity_counter <= disparity_next;
+                output_register   <= output_next;
 
                 --------------------------------------------------------------------
-                -- ZERO-CYCLE LATENCY FIX: Update dout with same value as q_out
+                -- ZERO-CYCLE LATENCY FIX: Update dout with same value as output_register
                 --------------------------------------------------------------------
-                -- In video mode, assign dout <= q_out_next (same value going to q_out)
-                -- This eliminates the 1-cycle delay that was corrupting data island timing
-                dout <= q_out_next;     -- 0-cycle latency (same value as q_out)
+                dout <= output_next;     -- 0-cycle latency
             end if;
 
             -- NOTE: dout is now assigned in ALL three modes (data island, control, video)
             -- with 0-cycle latency in each case. No separate assignment needed here.
         end if;
-    end process;
+    end process tmds_encoding_process;
 
 end rtl;

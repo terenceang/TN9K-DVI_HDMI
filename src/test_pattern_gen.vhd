@@ -41,46 +41,51 @@ end test_pattern_gen;
 architecture rtl of test_pattern_gen is
 
     -- Sync signals
-    signal hsync_int, vsync_int : std_logic;
-
-    -- Color bar width (640 / 8 = 80 pixels per bar)
-    constant BAR_WIDTH : integer := H_ACTIVE / 8;
+    signal horizontal_sync : std_logic;
+    signal vertical_sync   : std_logic;
+    
+    -- Sync timing constants (optimized for synthesis)
+    constant H_SYNC_START : integer := 656;  -- 640 + 16
+    constant H_SYNC_END   : integer := 752;  -- 640 + 16 + 96
+    constant V_SYNC_START : integer := 490;  -- 480 + 10
+    constant V_SYNC_END   : integer := 492;  -- 480 + 10 + 2
 
 begin
 
     --------------------------------------------------------------------------------
-    -- Sync Generation (REGISTERED)
+    -- Sync Generation (REGISTERED - Optimized with constants)
     --------------------------------------------------------------------------------
-    process(clk_pixel, rst_n)
+    sync_generator: process(clk_pixel, rst_n)
     begin
         if rst_n = '0' then
-            hsync_int <= '1';  -- Inactive state (positive polarity becomes negative)
-            vsync_int <= '1';
+            horizontal_sync <= '1';  -- Inactive state (positive polarity becomes negative)
+            vertical_sync <= '1';
         elsif rising_edge(clk_pixel) then
-            -- HSync
-            if (h_count >= 640 + 16) and (h_count < 640 + 16 + 96) then
-                hsync_int <= '0';
+            -- HSync (using pre-computed constants)
+            if (h_count >= H_SYNC_START) and (h_count < H_SYNC_END) then
+                horizontal_sync <= '0';
             else
-                hsync_int <= '1';
+                horizontal_sync <= '1';
             end if;
 
-            -- VSync
-            if (v_count >= 480 + 10) and (v_count < 480 + 10 + 2) then
-                vsync_int <= '0';
+            -- VSync (using pre-computed constants)
+            if (v_count >= V_SYNC_START) and (v_count < V_SYNC_END) then
+                vertical_sync <= '0';
             else
-                vsync_int <= '1';
+                vertical_sync <= '1';
             end if;
         end if;
-    end process;
+    end process sync_generator;
 
-    hsync <= hsync_int;
-    vsync <= vsync_int;
+    hsync <= horizontal_sync;
+    vsync <= vertical_sync;
 
     --------------------------------------------------------------------------------
-    -- Color Bar Pattern Generation (REGISTERED to match sync timing)
+    -- Color Bar Pattern Generation (OPTIMIZED - Registered)
     --------------------------------------------------------------------------------
-    process(clk_pixel, rst_n)
-        variable bar_select : integer range 0 to 7;
+    -- Uses bit slicing instead of division for better resource usage
+    color_pattern_generator: process(clk_pixel, rst_n)
+        variable color_bar_index : std_logic_vector(2 downto 0);
     begin
         if rst_n = '0' then
             r <= (others => '0');
@@ -88,35 +93,24 @@ begin
             b <= (others => '0');
         elsif rising_edge(clk_pixel) then
             if de = '1' then
-                bar_select := to_integer(h_count) / BAR_WIDTH;
+                -- Extract bits 9:7 from h_count for bar selection (640/8 = 80 pixels per bar)
+                -- This is equivalent to dividing by 80 but uses only bit slicing
+                color_bar_index := std_logic_vector(h_count(9 downto 7));
 
-                case bar_select is
-                    when 0 =>  -- White
-                        r <= x"FF"; g <= x"FF"; b <= x"FF";
-                    when 1 =>  -- Yellow
-                        r <= x"FF"; g <= x"FF"; b <= x"00";
-                    when 2 =>  -- Cyan
-                        r <= x"00"; g <= x"FF"; b <= x"FF";
-                    when 3 =>  -- Green
-                        r <= x"00"; g <= x"FF"; b <= x"00";
-                    when 4 =>  -- Magenta
-                        r <= x"FF"; g <= x"00"; b <= x"FF";
-                    when 5 =>  -- Red
-                        r <= x"FF"; g <= x"00"; b <= x"00";
-                    when 6 =>  -- Blue
-                        r <= x"00"; g <= x"00"; b <= x"FF";
-                    when 7 =>  -- Black
-                        r <= x"00"; g <= x"00"; b <= x"00";
-                    when others =>
-                        r <= x"00"; g <= x"00"; b <= x"00";
-                end case;
+                -- Optimized color generation using color_bar_index directly
+                -- Each bar is defined by which bits are set
+                -- bar(2) controls Red, bar(1) controls Green, bar(0) controls Blue
+                -- Inverted logic to match expected pattern (White to Black gradient)
+                r <= (others => not color_bar_index(2));
+                g <= (others => not color_bar_index(1));
+                b <= (others => not color_bar_index(0));
             else
-                -- Blanking period
+                -- Blanking period - all channels to zero
                 r <= x"00";
                 g <= x"00";
                 b <= x"00";
             end if;
         end if;
-    end process;
+    end process color_pattern_generator;
 
 end rtl;

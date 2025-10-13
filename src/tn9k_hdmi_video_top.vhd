@@ -27,14 +27,7 @@ entity tn9k_hdmi_video_top is
         tmds_clk_p   : out std_logic;
         tmds_clk_n   : out std_logic;
         tmds_data_p  : out std_logic_vector(2 downto 0);
-        tmds_data_n  : out std_logic_vector(2 downto 0);
-
-        -- Temporary debug outputs (for logic analyzer / oscilloscope)
-        debug_h_count_out : out std_logic_vector(3 downto 0);
-        debug_v_count_out : out std_logic_vector(3 downto 0);
-        debug_de_out      : out std_logic;
-        debug_hsync_out   : out std_logic;
-        debug_vsync_out   : out std_logic
+        tmds_data_n  : out std_logic_vector(2 downto 0)
     );
 end tn9k_hdmi_video_top;
 
@@ -115,34 +108,25 @@ architecture rtl of tn9k_hdmi_video_top is
     --------------------------------------------------------------------------------
 
     -- Clock signals
-    signal clk_pixel  : std_logic;
-    signal clk_serial : std_logic;
-    signal pll_lock   : std_logic;
+    signal pixel_clock          : std_logic;
+    signal serial_clock_5x      : std_logic;
+    signal clock_pll_locked     : std_logic;
 
     -- Reset synchronization (2-stage synchronizer for metastability protection)
-    signal rst_sync_stage1_n : std_logic;
-    signal rst_sync_n        : std_logic;
+    signal reset_sync_stage1    : std_logic;
+    signal reset_synchronized   : std_logic;
 
-    -- Video signals
-    signal hsync : std_logic;
-    signal vsync : std_logic;
-    signal de    : std_logic;
-    signal r, g, b : std_logic_vector(7 downto 0);
+    -- Video timing and control signals
+    signal video_hsync          : std_logic;
+    signal video_vsync          : std_logic;
+    signal video_data_enable    : std_logic;
+    signal video_red            : std_logic_vector(7 downto 0);
+    signal video_green          : std_logic_vector(7 downto 0);
+    signal video_blue           : std_logic_vector(7 downto 0);
 
-    -- Debug signals
-    signal debug_h_count_int : unsigned(10 downto 0);
-    signal debug_v_count_int : unsigned(9 downto 0);
-
-    -- Gowin-specific synthesis attribute to prevent optimization
-    attribute syn_keep : string;
-    attribute syn_keep of debug_h_count_int : signal is "true";
-    attribute syn_keep of debug_v_count_int : signal is "true";
-    attribute syn_keep of hsync : signal is "true";
-    attribute syn_keep of vsync : signal is "true";
-    attribute syn_keep of de : signal is "true";
-    attribute syn_keep of r : signal is "true";
-    attribute syn_keep of g : signal is "true";
-    attribute syn_keep of b : signal is "true";
+    -- Timing counters
+    signal horizontal_counter   : unsigned(10 downto 0);
+    signal vertical_counter     : unsigned(9 downto 0);
 
 begin
 
@@ -151,13 +135,13 @@ begin
     --------------------------------------------------------------------------------
     -- 27 MHz -> 126 MHz (serial) and 25.2 MHz (pixel)
     --------------------------------------------------------------------------------
-    u_clk_gen: tn9k_clock_generator
+    clock_generator_inst: tn9k_clock_generator
         port map (
             clkin   => clk_27m,
             reset   => not rst_n,
-            clkout0 => clk_pixel,
-            clkout1 => clk_serial,
-            lock    => pll_lock
+            clkout0 => pixel_clock,
+            clkout1 => serial_clock_5x,
+            lock    => clock_pll_locked
         );
 
     --------------------------------------------------------------------------------
@@ -166,15 +150,15 @@ begin
     -- Combines external reset with PLL lock and synchronizes to pixel clock domain
     -- Two flip-flop stages reduce probability of metastability propagation
     --------------------------------------------------------------------------------
-    process(clk_pixel)
+    reset_synchronizer: process(pixel_clock)
     begin
-        if rising_edge(clk_pixel) then
+        if rising_edge(pixel_clock) then
             -- Stage 1: First flip-flop (may go metastable)
-            rst_sync_stage1_n <= rst_n and pll_lock;
+            reset_sync_stage1 <= rst_n and clock_pll_locked;
             -- Stage 2: Second flip-flop (resolves metastability)
-            rst_sync_n <= rst_sync_stage1_n;
+            reset_synchronized <= reset_sync_stage1;
         end if;
-    end process;
+    end process reset_synchronizer;
 
     --------------------------------------------------------------------------------
     -- Test Pattern Generator
@@ -182,7 +166,7 @@ begin
     -- Uses h_count/v_count from HDMI encoder as master timing source
     -- This ensures perfect synchronization between video generation and encoding
     --------------------------------------------------------------------------------
-    u_pattern: test_pattern_gen
+    pattern_generator_inst: test_pattern_gen
         generic map (
             H_ACTIVE => H_ACTIVE,
             H_TOTAL  => H_TOTAL,
@@ -190,22 +174,22 @@ begin
             V_TOTAL  => V_TOTAL
         )
         port map (
-            clk_pixel      => clk_pixel,
-            rst_n          => rst_sync_n,
-            h_count        => debug_h_count_int,  -- Master timing from HDMI encoder
-            v_count        => debug_v_count_int,  -- Master timing from HDMI encoder
-            hsync          => hsync,
-            vsync          => vsync,
-            de             => de,
-            r              => r,
-            g              => g,
-            b              => b
+            clk_pixel      => pixel_clock,
+            rst_n          => reset_synchronized,
+            h_count        => horizontal_counter,
+            v_count        => vertical_counter,
+            hsync          => video_hsync,
+            vsync          => video_vsync,
+            de             => video_data_enable,
+            r              => video_red,
+            g              => video_green,
+            b              => video_blue
         );
 
     --------------------------------------------------------------------------------
     -- HDMI Encoder
     --------------------------------------------------------------------------------
-    u_hdmi: hdmi_encoder
+    hdmi_encoder_inst: hdmi_encoder
         generic map (
             H_ACTIVE => H_ACTIVE,
             H_TOTAL  => H_TOTAL,
@@ -213,30 +197,21 @@ begin
             V_TOTAL  => V_TOTAL
         )
         port map (
-            clk_pixel      => clk_pixel,
-            clk_serial     => clk_serial,
-            rst_n          => rst_sync_n,
-            hsync          => hsync,
-            vsync          => vsync,
-            r              => r,
-            g              => g,
-            b              => b,
+            clk_pixel      => pixel_clock,
+            clk_serial     => serial_clock_5x,
+            rst_n          => reset_synchronized,
+            hsync          => video_hsync,
+            vsync          => video_vsync,
+            r              => video_red,
+            g              => video_green,
+            b              => video_blue,
             tmds_clk_p     => tmds_clk_p,
             tmds_clk_n     => tmds_clk_n,
             tmds_data_p    => tmds_data_p,
             tmds_data_n    => tmds_data_n,
-            h_count_out    => debug_h_count_int,
-            v_count_out    => debug_v_count_int,
-            de_debug       => de
+            h_count_out    => horizontal_counter,
+            v_count_out    => vertical_counter,
+            de_debug       => video_data_enable
         );
-
-    --------------------------------------------------------------------------------
-    -- Debug Output Assignments (Temporary - for logic analyzer)
-    --------------------------------------------------------------------------------
-    debug_h_count_out <= std_logic_vector(debug_h_count_int(3 downto 0));
-    debug_v_count_out <= std_logic_vector(debug_v_count_int(3 downto 0));
-    debug_de_out      <= de;
-    debug_hsync_out   <= hsync;
-    debug_vsync_out   <= vsync;
 
 end rtl;
