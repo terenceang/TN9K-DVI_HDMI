@@ -1,0 +1,15 @@
+# FPGA build outputs
+impl/
+
+# Gowin IDE files
+*.gprj.user
+*.gprj.user.backup
+
+# Backup files
+*~
+*.bak
+*.backup
+
+# OS files
+.DS_Store
+Thumbs.db

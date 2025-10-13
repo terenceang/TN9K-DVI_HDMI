@@ -1,0 +1,5 @@
+description = "Flashes the bitstream to SRAM (temporary)."
+prompt = """
+Flashing to SRAM...
+!{\"C:\\Gowin\\Gowin_V1.9.12_x64\\Programmer\\bin\\programmer_cli.exe\" --device GW1NR-9C --run 2 --fsFile \"impl\\pnr\\TN9K_HDMI_VIDEO_AUDIO.fs\"}
+"""
