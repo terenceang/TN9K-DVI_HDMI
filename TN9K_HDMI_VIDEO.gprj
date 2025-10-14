@@ -12,6 +12,8 @@
         <File path="src/audio_sample_packet.vhd" type="file.vhdl" enable="1"/>
         <File path="src/audio_test_gen.vhd" type="file.vhdl" enable="1"/>
         <File path="src/avi_infoframe.vhd" type="file.vhdl" enable="1"/>
+        <File path="src/gowin_clkdiv/gowin_clkdiv.vhd" type="file.vhdl" enable="1"/>
+        <File path="src/gowin_rpll/gowin_rpll.vhd" type="file.vhdl" enable="1"/>
         <File path="src/hdmi_encoder.vhd" type="file.vhdl" enable="1"/>
         <File path="src/packet_scheduler.vhd" type="file.vhdl" enable="1"/>
         <File path="src/terc4_encoder.vhd" type="file.vhdl" enable="1"/>
@@ -19,9 +21,8 @@
         <File path="src/tmds_encoder.vhd" type="file.vhdl" enable="1"/>
         <File path="src/tn9k_clock_generator.vhd" type="file.vhdl" enable="1"/>
         <File path="src/tn9k_hdmi_video_top.vhd" type="file.vhdl" enable="1"/>
-        <File path="src/gowin_clkdiv/gowin_clkdiv.vhd" type="file.vhdl" enable="1"/>
-        <File path="src/gowin_rpll/gowin_rpll.vhd" type="file.vhdl" enable="1"/>
         <File path="src/tangnano9k.cst" type="file.cst" enable="1"/>
         <File path="src/TN9K_HDMI_VIDEO.sdc" type="file.sdc" enable="1"/>
+        <File path="src/TN9K_HDMI_VIDEO.rao" type="file.gao" enable="1"/>
     </FileList>
 </Project>

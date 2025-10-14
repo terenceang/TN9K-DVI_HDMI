@@ -1,0 +1,105 @@
+<?xml version="1" encoding="UTF-8"?>
+<GAO_CONFIG>
+    <Version>3.0</Version>
+    <Mode>Standard</Mode>
+    <AoCore index="0" sample_clock="pixel_clock" trig_type="0" storage_depth="1024" window_num="1" capture_amount="1024" implementation="0" trigger_pos="0" module_name="tn9k_hdmi_video_top" force_trigger_by_falling_edge="false" capture_init_data_enabled="false">
+        <SignalList>
+            <Signal capture_enable="true">pixel_clock</Signal>
+            <Signal capture_enable="true">video_hsync</Signal>
+            <Signal capture_enable="true">hdmi_encoder_inst/preamble_active</Signal>
+            <Bus capture_enable="true" name="horizontal_counter[10:0]">
+                <Signal>horizontal_counter[10]</Signal>
+                <Signal>horizontal_counter[9]</Signal>
+                <Signal>horizontal_counter[8]</Signal>
+                <Signal>horizontal_counter[7]</Signal>
+                <Signal>horizontal_counter[6]</Signal>
+                <Signal>horizontal_counter[5]</Signal>
+                <Signal>horizontal_counter[4]</Signal>
+                <Signal>horizontal_counter[3]</Signal>
+                <Signal>horizontal_counter[2]</Signal>
+                <Signal>horizontal_counter[1]</Signal>
+                <Signal>horizontal_counter[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="hdmi_encoder_inst/tmds_encoded_red[9:0]">
+                <Signal>hdmi_encoder_inst/tmds_encoded_red[9]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_red[8]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_red[7]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_red[6]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_red[5]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_red[4]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_red[3]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_red[2]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_red[1]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_red[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="hdmi_encoder_inst/tmds_encoded_green[9:0]">
+                <Signal>hdmi_encoder_inst/tmds_encoded_green[9]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_green[8]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_green[7]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_green[6]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_green[5]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_green[4]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_green[3]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_green[2]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_green[1]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_green[0]</Signal>
+            </Bus>
+            <Bus capture_enable="true" name="hdmi_encoder_inst/tmds_encoded_blue[9:0]">
+                <Signal>hdmi_encoder_inst/tmds_encoded_blue[9]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_blue[8]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_blue[7]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_blue[6]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_blue[5]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_blue[4]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_blue[3]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_blue[2]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_blue[1]</Signal>
+                <Signal>hdmi_encoder_inst/tmds_encoded_blue[0]</Signal>
+            </Bus>
+        </SignalList>
+        <Triggers>
+            <Trigger index="0">
+                <SignalList>
+                    <Signal>pixel_clock</Signal>
+                </SignalList>
+            </Trigger>
+            <Trigger index="1"/>
+            <Trigger index="2"/>
+            <Trigger index="3"/>
+            <Trigger index="4"/>
+            <Trigger index="5"/>
+            <Trigger index="6"/>
+            <Trigger index="7"/>
+            <Trigger index="8"/>
+            <Trigger index="9"/>
+            <Trigger index="10"/>
+            <Trigger index="11"/>
+            <Trigger index="12"/>
+            <Trigger index="13"/>
+            <Trigger index="14"/>
+            <Trigger index="15"/>
+        </Triggers>
+        <MatchUnits>
+            <MatchUnit index="0" enabled="1" match_type="1" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="0" value1="0" trigger="0"/>
+            <MatchUnit index="1" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="2" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="3" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="4" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="5" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="6" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="7" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="8" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="9" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="10" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="11" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="12" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="13" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="14" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+            <MatchUnit index="15" enabled="0" match_type="0" counter_enable="0" counter_width="2" counter="2" countinuous="0" func="0" value0="" value1=""/>
+        </MatchUnits>
+        <Expressions type="Static">
+            <Expression>M0</Expression>
+        </Expressions>
+    </AoCore>
+    <GAO_ID>0100101001111101</GAO_ID>
+</GAO_CONFIG>

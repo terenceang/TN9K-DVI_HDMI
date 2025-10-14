@@ -72,3 +72,13 @@ set_false_path -to [get_ports {tmds_clk_n}]
 # The pixel clock (25.2 MHz) and serial clock (126 MHz) are synchronous - both
 # derived from the same rPLL with a 5:1 frequency relationship. Timing paths
 # between these domains are automatically analyzed by the Gowin timing engine.
+
+# ===== ASYNCHRONOUS RESET PATHS =====
+# The 'reset_synchronized' signal is synchronized to the pixel clock domain.
+# When used as a reset for modules operating in the serial clock domain (e.g., serializers),
+# it constitutes an asynchronous clock domain crossing for the reset signal itself.
+# These paths are handled by design (e.g., internal synchronizers within the serializers or
+# by the nature of asynchronous resets) and should not be checked for synchronous timing.
+set_false_path -from [get_cells {reset_synchronized_s0}] -to [get_pins {hdmi_encoder_inst/serializer_blue/RESET}]
+set_false_path -from [get_cells {reset_synchronized_s0}] -to [get_pins {hdmi_encoder_inst/serializer_green/RESET}]
+set_false_path -from [get_cells {reset_synchronized_s0}] -to [get_pins {hdmi_encoder_inst/serializer_red/RESET}]
