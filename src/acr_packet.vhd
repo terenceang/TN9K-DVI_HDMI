@@ -27,16 +27,19 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.hdmi_config_pkg.all;
 
 entity acr_packet is
     generic (
         -- Audio sample rate (Hz)
-        AUDIO_SAMPLE_RATE : integer := 48_000;
+        AUDIO_SAMPLE_RATE : integer := HDMI_AUDIO_DEFAULT.sample_rate;
         -- Pixel/TMDS clock frequency (Hz)
-        PIXEL_CLK_FREQ    : integer := 25_200_000;
+        PIXEL_CLK_FREQ    : integer := HDMI_AUDIO_DEFAULT.pixel_clock_hz;
         -- ACR transmission interval (pixel clocks)
-        -- Send every frame = 800×525 = 420,000 pixel clocks
-        ACR_INTERVAL      : integer := 420_000
+        -- Send every frame = 800x525 = 420,000 pixel clocks
+        ACR_INTERVAL      : integer := HDMI_AUDIO_DEFAULT.acr_interval;
+        -- HDMI N parameter (Table 7-1)
+        N_VALUE           : integer := HDMI_AUDIO_DEFAULT.acr_n_value
     );
     port (
         -- Clock and reset
@@ -62,33 +65,46 @@ end acr_packet;
 architecture rtl of acr_packet is
 
     --------------------------------------------------------------------------------
+    -- BCH ECC Component
+    --------------------------------------------------------------------------------
+    component bch_ecc is
+        port (
+            header_in   : in  std_logic_vector(23 downto 0);
+            ecc_out     : out std_logic_vector(7 downto 0)
+        );
+    end component;
+
+    --------------------------------------------------------------------------------
     -- ACR Constants (per HDMI spec)
     --------------------------------------------------------------------------------
-    constant N_VALUE : integer := 6144;  -- Fixed for 48 kHz
     
     -- Calculate CTS: (f_TMDS × N) / (128 × f_s)
     -- For 25.2 MHz: (25,200,000 × 6144) / (128 × 48,000) = 25,200
     constant CTS_VALUE : integer := (PIXEL_CLK_FREQ * N_VALUE) / (128 * AUDIO_SAMPLE_RATE);
     
-    -- ACR packet type
-    constant ACR_HEADER_TYPE : std_logic_vector(7 downto 0) := x"01";
+    -- ACR packet header bytes (HB0, HB1, HB2)
+    constant ACR_HB0 : std_logic_vector(7 downto 0) := x"01";  -- ACR packet type
+    constant ACR_HB1 : std_logic_vector(7 downto 0) := x"00";  -- Reserved
+    constant ACR_HB2 : std_logic_vector(7 downto 0) := x"00";  -- Reserved
+    
+    -- BCH ECC signals
+    signal acr_header : std_logic_vector(23 downto 0);
+    signal acr_ecc    : std_logic_vector(7 downto 0);
+    
+    -- Synthesis attributes to prevent optimization of ECC signal
+    -- Declare attribute types once and then apply to signals below
+    attribute syn_keep : boolean;
+    attribute syn_preserve : boolean;
+    attribute syn_keep of acr_ecc : signal is true;
+    attribute syn_preserve of acr_ecc : signal is true;
     
     --------------------------------------------------------------------------------
     -- ACR Packet Structure (8 words × 32 bits)
     --------------------------------------------------------------------------------
     type acr_packet_t is array (0 to 7) of std_logic_vector(31 downto 0);
     
-    -- ACR packet ROM as constant (eliminates latch warnings)
-    constant ACR_PACKET_ROM : acr_packet_t := (
-        0 => x"00" & x"00" & x"00" & ACR_HEADER_TYPE,  -- Header: Type=0x01
-        1 => std_logic_vector(to_unsigned(CTS_VALUE, 20)) & x"000",  -- CTS value
-        2 => std_logic_vector(to_unsigned(N_VALUE, 20)) & x"000",    -- N value
-        3 => (others => '0'),  -- Padding
-        4 => (others => '0'),
-        5 => (others => '0'),
-        6 => (others => '0'),
-        7 => (others => '0')
-    );
+    -- ACR packet with ECC (computed by bch_ecc component)
+    signal acr_packet_rom : acr_packet_t;
     
     --------------------------------------------------------------------------------
     -- State Machine
@@ -120,15 +136,38 @@ architecture rtl of acr_packet is
     --------------------------------------------------------------------------------
     -- Synthesis Attributes
     --------------------------------------------------------------------------------
-    attribute syn_preserve : boolean;
-    attribute syn_keep : boolean;
-    
     attribute syn_preserve of acr_valid_reg : signal is true;
     attribute syn_preserve of acr_request_reg : signal is true;
     attribute syn_preserve of acr_sent_count : signal is true;
     attribute syn_keep of acr_valid_reg : signal is true;
 
 begin
+
+    --------------------------------------------------------------------------------
+    -- BCH ECC Calculation for ACR Packet Header
+    --------------------------------------------------------------------------------
+    -- Header: HB0=0x01, HB1=0x00, HB2=0x00
+    acr_header <= ACR_HB2 & ACR_HB1 & ACR_HB0;
+    
+    bch_ecc_inst: bch_ecc
+        port map (
+            header_in => acr_header,
+            ecc_out   => acr_ecc
+        );
+    
+    --------------------------------------------------------------------------------
+    -- ACR Packet Assembly with BCH ECC
+    --------------------------------------------------------------------------------
+    -- Word 0: [ECC] [HB2] [HB1] [HB0]
+    -- Per HDMI spec: Subpacket 0 contains header bytes + ECC
+    acr_packet_rom(0) <= acr_ecc & ACR_HB2 & ACR_HB1 & ACR_HB0;
+    acr_packet_rom(1) <= std_logic_vector(to_unsigned(CTS_VALUE, 20)) & x"000";
+    acr_packet_rom(2) <= std_logic_vector(to_unsigned(N_VALUE, 20)) & x"000";
+    acr_packet_rom(3) <= (others => '0');
+    acr_packet_rom(4) <= (others => '0');
+    acr_packet_rom(5) <= (others => '0');
+    acr_packet_rom(6) <= (others => '0');
+    acr_packet_rom(7) <= (others => '0');
 
     --------------------------------------------------------------------------------
     -- Transmission Timer
@@ -196,7 +235,7 @@ begin
                 --------------------------------------------------------------------
                 when ST_SEND_PACKET =>
                     -- Output current word from ROM
-                    acr_data_reg <= ACR_PACKET_ROM(to_integer(word_index));
+                    acr_data_reg <= acr_packet_rom(to_integer(word_index));
                     acr_valid_reg <= '1';
                     if word_index = 0 then
                         acr_start_reg <= '1';
@@ -253,3 +292,4 @@ begin
     dbg_acr_sent <= std_logic_vector(acr_sent_count);
 
 end rtl;
+

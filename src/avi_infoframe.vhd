@@ -54,11 +54,32 @@ end avi_infoframe;
 architecture rtl of avi_infoframe is
 
     --------------------------------------------------------------------------------
+    -- BCH ECC Component
+    --------------------------------------------------------------------------------
+    component bch_ecc is
+        port (
+            header_in   : in  std_logic_vector(23 downto 0);
+            ecc_out     : out std_logic_vector(7 downto 0)
+        );
+    end component;
+
+    --------------------------------------------------------------------------------
     -- AVI Constants (per HDMI spec)
     --------------------------------------------------------------------------------
     constant AVI_TYPE    : std_logic_vector(7 downto 0) := x"82";  -- AVI InfoFrame
     constant AVI_VERSION : std_logic_vector(7 downto 0) := x"02";  -- Version 2
     constant AVI_LENGTH  : std_logic_vector(7 downto 0) := x"0D";  -- 13 bytes
+    
+    -- BCH ECC signals for packet header
+    signal avi_packet_header : std_logic_vector(23 downto 0);
+    signal avi_packet_ecc    : std_logic_vector(7 downto 0);
+    
+    -- Synthesis attributes to prevent optimization of ECC signal
+    -- Declare attribute types once and then apply to signals below
+    attribute syn_keep : boolean;
+    attribute syn_preserve : boolean;
+    attribute syn_keep of avi_packet_ecc : signal is true;
+    attribute syn_preserve of avi_packet_ecc : signal is true;
     
     -- Video format: VIC=1 (640×480p@60Hz), RGB, 4:3
     constant VIDEO_ID_CODE  : std_logic_vector(6 downto 0) := "0000001";  -- VIC=1
@@ -72,20 +93,22 @@ architecture rtl of avi_infoframe is
     --------------------------------------------------------------------------------
     type avi_packet_t is array (0 to 7) of std_logic_vector(31 downto 0);
     
-    -- Static part of AVI packet (checksum computed at runtime)
+    -- Static part of AVI packet (checksum and ECC computed at runtime)
+    -- Note: Word 0 contains packet header (HB0, HB1, HB2) + BCH ECC
+    --       Word 1+ contains InfoFrame payload starting with InfoFrame checksum (PB0)
     constant AVI_PACKET_BASE : avi_packet_t := (
-        0 => x"00" & AVI_LENGTH & AVI_VERSION & AVI_TYPE,  -- Checksum filled at runtime
-        1 => ('0' & VIDEO_ID_CODE) & x"00" & ("00" & ASPECT_RATIO & ACTIVE_FORMAT) & ("0" & COLOR_SPACE & '1' & "00" & "00"),
-        2 => x"000000" & (x"0" & PIXEL_REPEAT),
-        3 => x"00000000",
-        4 => x"00000000",
-        5 => x"00000000",
-        6 => x"00000000",
-        7 => x"00000000"
+        0 => x"00" & AVI_LENGTH & AVI_VERSION & AVI_TYPE,  -- Packet header + ECC (filled at runtime)
+        1 => ('0' & VIDEO_ID_CODE) & x"00" & ("00" & ASPECT_RATIO & ACTIVE_FORMAT) & x"00",  -- PB0=checksum (filled) + PB1-PB3
+        2 => x"000000" & ("0" & COLOR_SPACE & '1' & "00" & "00"),  -- PB4-PB7 (DB1)
+        3 => x"00000000",  -- PB8-PB11
+        4 => x"00000000",  -- PB12-PB15
+        5 => x"00000000",  -- PB16-PB19
+        6 => x"00000000",  -- PB20-PB23
+        7 => x"00000000"   -- PB24-PB27
     );
     
     signal avi_packet_with_checksum : avi_packet_t;
-    signal checksum : unsigned(7 downto 0);
+    signal infoframe_checksum : unsigned(7 downto 0);
     
     --------------------------------------------------------------------------------
     -- State Machine
@@ -117,9 +140,6 @@ architecture rtl of avi_infoframe is
     --------------------------------------------------------------------------------
     -- Synthesis Attributes
     --------------------------------------------------------------------------------
-    attribute syn_preserve : boolean;
-    attribute syn_keep : boolean;
-    
     attribute syn_preserve of avi_valid_reg : signal is true;
     attribute syn_preserve of avi_request_reg : signal is true;
     attribute syn_preserve of avi_sent_count : signal is true;
@@ -128,7 +148,19 @@ architecture rtl of avi_infoframe is
 begin
 
     --------------------------------------------------------------------------------
-    -- Checksum Calculation
+    -- BCH ECC Calculation for HDMI Packet Header
+    --------------------------------------------------------------------------------
+    -- Packet header: HB0=Type, HB1=Version, HB2=Length
+    avi_packet_header <= AVI_LENGTH & AVI_VERSION & AVI_TYPE;
+    
+    bch_ecc_inst: bch_ecc
+        port map (
+            header_in => avi_packet_header,
+            ecc_out   => avi_packet_ecc
+        );
+    
+    --------------------------------------------------------------------------------
+    -- InfoFrame Checksum Calculation
     --------------------------------------------------------------------------------
     -- Checksum = 256 - (sum of all header and data bytes) mod 256
     --------------------------------------------------------------------------------
@@ -136,7 +168,7 @@ begin
         variable sum : unsigned(15 downto 0);
     begin
         if rst_n = '0' then
-            checksum <= (others => '0');
+            infoframe_checksum <= (others => '0');
         elsif rising_edge(clk_pixel) then
             -- Sum all bytes: Header + Data
             sum := (others => '0');
@@ -165,21 +197,23 @@ begin
             end loop;
             
             -- Calculate checksum
-            checksum <= 256 - sum(7 downto 0);
+            infoframe_checksum <= 256 - sum(7 downto 0);
         end if;
     end process checksum_calc;
     
     --------------------------------------------------------------------------------
-    -- AVI Packet Assembly with Checksum
+    -- AVI Packet Assembly with Checksum and ECC
     --------------------------------------------------------------------------------
-    -- Combine base packet with computed checksum
+    -- Combine base packet with computed checksum and BCH ECC
     --------------------------------------------------------------------------------
-    avi_packet_assembly: process(checksum)
+    avi_packet_assembly: process(infoframe_checksum, avi_packet_ecc)
     begin
         -- Copy base packet
         avi_packet_with_checksum <= AVI_PACKET_BASE;
-        -- Insert checksum into word 0 bits [31:24]
-        avi_packet_with_checksum(0)(31 downto 24) <= std_logic_vector(checksum);
+        -- Insert BCH ECC into word 0 bits [31:24]
+        avi_packet_with_checksum(0)(31 downto 24) <= avi_packet_ecc;
+        -- Insert InfoFrame checksum into word 1 bits [7:0] (PB0)
+        avi_packet_with_checksum(1)(7 downto 0) <= std_logic_vector(infoframe_checksum);
     end process avi_packet_assembly;
     
     --------------------------------------------------------------------------------

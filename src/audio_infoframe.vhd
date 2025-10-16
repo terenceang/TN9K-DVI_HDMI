@@ -52,11 +52,32 @@ end audio_infoframe;
 architecture rtl of audio_infoframe is
 
     --------------------------------------------------------------------------------
+    -- BCH ECC Component
+    --------------------------------------------------------------------------------
+    component bch_ecc is
+        port (
+            header_in   : in  std_logic_vector(23 downto 0);
+            ecc_out     : out std_logic_vector(7 downto 0)
+        );
+    end component;
+
+    --------------------------------------------------------------------------------
     -- AIF Constants (per HDMI spec)
     --------------------------------------------------------------------------------
     constant AIF_TYPE    : std_logic_vector(7 downto 0) := x"84";  -- Audio InfoFrame
     constant AIF_VERSION : std_logic_vector(7 downto 0) := x"01";  -- Version 1
     constant AIF_LENGTH  : std_logic_vector(7 downto 0) := x"0A";  -- 10 bytes
+    
+    -- BCH ECC signals for packet header
+    signal aif_packet_header : std_logic_vector(23 downto 0);
+    signal aif_packet_ecc    : std_logic_vector(7 downto 0);
+    
+    -- Synthesis attributes to prevent optimization of ECC signal
+    -- Declare attribute types once and then apply to signals below
+    attribute syn_keep : boolean;
+    attribute syn_preserve : boolean;
+    attribute syn_keep of aif_packet_ecc : signal is true;
+    attribute syn_preserve of aif_packet_ecc : signal is true;
     
     -- Audio format: LPCM=0x01, 2-channel, 48 kHz, 16-bit
     constant AUDIO_CODING_TYPE  : std_logic_vector(3 downto 0) := x"1";  -- LPCM
@@ -69,20 +90,20 @@ architecture rtl of audio_infoframe is
     --------------------------------------------------------------------------------
     type aif_packet_t is array (0 to 7) of std_logic_vector(31 downto 0);
     
-    -- Static part of AIF packet (checksum computed at runtime)
+    -- Static part of AIF packet (checksum and ECC computed at runtime)
     constant AIF_PACKET_BASE : aif_packet_t := (
-        0 => x"00" & AIF_LENGTH & AIF_VERSION & AIF_TYPE,  -- Checksum filled at runtime
-        1 => x"00" & x"00" & (SAMPLE_SIZE & SAMPLE_FREQUENCY & "000") & (AUDIO_CODING_TYPE & CHANNEL_COUNT & '0'),
-        2 => x"00000000",
-        3 => x"00000000",
-        4 => x"00000000",
-        5 => x"00000000",
-        6 => x"00000000",
-        7 => x"00000000"
+        0 => x"00" & AIF_LENGTH & AIF_VERSION & AIF_TYPE,  -- Packet header + ECC (filled at runtime)
+        1 => x"00" & x"00" & (SAMPLE_SIZE & SAMPLE_FREQUENCY & "000") & x"00",  -- PB0=checksum (filled) + PB1-PB3
+        2 => x"00000000",  -- PB4-PB7
+        3 => x"00000000",  -- PB8-PB11
+        4 => x"00000000",  -- PB12-PB15
+        5 => x"00000000",  -- PB16-PB19
+        6 => x"00000000",  -- PB20-PB23
+        7 => x"00000000"   -- PB24-PB27
     );
     
     signal aif_packet_with_checksum : aif_packet_t;
-    signal checksum : unsigned(7 downto 0);
+    signal infoframe_checksum : unsigned(7 downto 0);
     
     --------------------------------------------------------------------------------
     -- State Machine
@@ -114,9 +135,6 @@ architecture rtl of audio_infoframe is
     --------------------------------------------------------------------------------
     -- Synthesis Attributes
     --------------------------------------------------------------------------------
-    attribute syn_preserve : boolean;
-    attribute syn_keep : boolean;
-    
     attribute syn_preserve of aif_valid_reg : signal is true;
     attribute syn_preserve of aif_request_reg : signal is true;
     attribute syn_preserve of aif_sent_count : signal is true;
@@ -125,7 +143,19 @@ architecture rtl of audio_infoframe is
 begin
 
     --------------------------------------------------------------------------------
-    -- Checksum Calculation
+    -- BCH ECC Calculation for HDMI Packet Header
+    --------------------------------------------------------------------------------
+    -- Packet header: HB0=Type, HB1=Version, HB2=Length
+    aif_packet_header <= AIF_LENGTH & AIF_VERSION & AIF_TYPE;
+    
+    bch_ecc_inst: bch_ecc
+        port map (
+            header_in => aif_packet_header,
+            ecc_out   => aif_packet_ecc
+        );
+    
+    --------------------------------------------------------------------------------
+    -- InfoFrame Checksum Calculation
     --------------------------------------------------------------------------------
     -- Checksum Calculation
     --------------------------------------------------------------------------------
@@ -133,7 +163,7 @@ begin
         variable sum : unsigned(15 downto 0);
     begin
         if rst_n = '0' then
-            checksum <= (others => '0');
+            infoframe_checksum <= (others => '0');
         elsif rising_edge(clk_pixel) then
             -- Sum all bytes: Header + Data
             sum := (others => '0');
@@ -159,21 +189,25 @@ begin
             sum := sum + x"00" + x"00" + x"00" + x"00" + x"00" + x"00";
             
             -- Calculate checksum
-            checksum <= 256 - sum(7 downto 0);
+            infoframe_checksum <= 256 - sum(7 downto 0);
         end if;
     end process checksum_proc;
     
     --------------------------------------------------------------------------------
-    -- AIF Packet Assembly with Checksum
+    -- AIF Packet Assembly with Checksum and ECC
     --------------------------------------------------------------------------------
-    -- Combine base packet with computed checksum
+    -- Combine base packet with computed checksum and BCH ECC
     --------------------------------------------------------------------------------
-    aif_packet_assembly: process(checksum)
+    aif_packet_assembly: process(infoframe_checksum, aif_packet_ecc)
     begin
         -- Copy base packet
         aif_packet_with_checksum <= AIF_PACKET_BASE;
-        -- Insert checksum into word 0 bits [31:24]
-        aif_packet_with_checksum(0)(31 downto 24) <= std_logic_vector(checksum);
+        -- Insert BCH ECC into word 0 bits [31:24]
+        aif_packet_with_checksum(0)(31 downto 24) <= aif_packet_ecc;
+        -- Insert InfoFrame checksum into word 1 bits [7:0] (PB0)
+        aif_packet_with_checksum(1)(7 downto 0) <= std_logic_vector(infoframe_checksum);
+        -- Insert audio format into word 1 bits [15:8] (PB1)
+        aif_packet_with_checksum(1)(15 downto 8) <= AUDIO_CODING_TYPE & CHANNEL_COUNT & '0';
     end process aif_packet_assembly;
     
     --------------------------------------------------------------------------------

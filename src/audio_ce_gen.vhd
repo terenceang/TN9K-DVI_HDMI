@@ -21,13 +21,14 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.hdmi_config_pkg.all;
 
 entity audio_ce_gen is
     generic (
         -- Pixel clock frequency (Hz)
-        PIXEL_CLK_FREQ  : integer := 25_200_000;
+        PIXEL_CLK_FREQ  : integer := HDMI_AUDIO_DEFAULT.pixel_clock_hz;
         -- Audio sample rate (Hz)
-        AUDIO_SAMPLE_RATE : integer := 48_000
+        AUDIO_SAMPLE_RATE : integer := HDMI_AUDIO_DEFAULT.sample_rate
     );
     port (
         -- Pixel clock domain

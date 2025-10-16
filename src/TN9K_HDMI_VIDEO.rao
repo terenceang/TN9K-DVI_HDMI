@@ -2,24 +2,8 @@
 <GAO_CONFIG>
     <Version>3.0</Version>
     <Mode>Standard</Mode>
-    <AoCore index="0" sample_clock="pixel_clock" trig_type="0" storage_depth="1024" window_num="1" capture_amount="1024" implementation="0" trigger_pos="0" module_name="tn9k_hdmi_video_top" force_trigger_by_falling_edge="false" capture_init_data_enabled="false">
+    <AoCore index="0" sample_clock="pixel_clock" trig_type="0" storage_depth="8192" window_num="1" capture_amount="8192" implementation="0" trigger_pos="0" module_name="tn9k_hdmi_video_top" force_trigger_by_falling_edge="false" capture_init_data_enabled="false">
         <SignalList>
-            <Signal capture_enable="true">pixel_clock</Signal>
-            <Signal capture_enable="true">video_hsync</Signal>
-            <Signal capture_enable="true">hdmi_encoder_inst/preamble_active</Signal>
-            <Bus capture_enable="true" name="horizontal_counter[10:0]">
-                <Signal>horizontal_counter[10]</Signal>
-                <Signal>horizontal_counter[9]</Signal>
-                <Signal>horizontal_counter[8]</Signal>
-                <Signal>horizontal_counter[7]</Signal>
-                <Signal>horizontal_counter[6]</Signal>
-                <Signal>horizontal_counter[5]</Signal>
-                <Signal>horizontal_counter[4]</Signal>
-                <Signal>horizontal_counter[3]</Signal>
-                <Signal>horizontal_counter[2]</Signal>
-                <Signal>horizontal_counter[1]</Signal>
-                <Signal>horizontal_counter[0]</Signal>
-            </Bus>
             <Bus capture_enable="true" name="hdmi_encoder_inst/tmds_encoded_red[9:0]">
                 <Signal>hdmi_encoder_inst/tmds_encoded_red[9]</Signal>
                 <Signal>hdmi_encoder_inst/tmds_encoded_red[8]</Signal>
@@ -101,5 +85,5 @@
             <Expression>M0</Expression>
         </Expressions>
     </AoCore>
-    <GAO_ID>0100101001111101</GAO_ID>
+    <GAO_ID>0100010101100000</GAO_ID>
 </GAO_CONFIG>

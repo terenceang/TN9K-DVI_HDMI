@@ -52,10 +52,34 @@ end audio_sample_packet;
 architecture rtl of audio_sample_packet is
 
     --------------------------------------------------------------------------------
+    -- BCH ECC Component
+    --------------------------------------------------------------------------------
+    component bch_ecc is
+        port (
+            header_in   : in  std_logic_vector(23 downto 0);
+            ecc_out     : out std_logic_vector(7 downto 0)
+        );
+    end component;
+
+    --------------------------------------------------------------------------------
     -- ASP Packet Constants
     --------------------------------------------------------------------------------
-    constant ASP_HEADER_TYPE : std_logic_vector(7 downto 0) := x"02";  -- Audio Sample Packet
-    constant HEADER_WORD     : std_logic_vector(31 downto 0) := x"00000402";
+    -- ASP Header bytes (per HDMI spec)
+    constant ASP_HB0 : std_logic_vector(7 downto 0) := x"02";  -- Audio Sample Packet type
+    constant ASP_HB1 : std_logic_vector(7 downto 0) := x"00";  -- Reserved/Flags
+    constant ASP_HB2 : std_logic_vector(7 downto 0) := x"00";  -- Reserved
+    
+    -- BCH ECC signals
+    signal asp_header : std_logic_vector(23 downto 0);
+    signal asp_ecc    : std_logic_vector(7 downto 0);
+    signal header_word : std_logic_vector(31 downto 0);
+    
+    -- Synthesis attributes to prevent optimization of ECC signal
+    -- Declare attribute types once and then apply to signals below
+    attribute syn_keep : boolean;
+    attribute syn_preserve : boolean;
+    attribute syn_keep of asp_ecc : signal is true;
+    attribute syn_preserve of asp_ecc : signal is true;
     
     --------------------------------------------------------------------------------
     -- Packet State Machine
@@ -74,9 +98,10 @@ architecture rtl of audio_sample_packet is
     signal sample_count : unsigned(1 downto 0);  -- 0-2 samples stored
     
     function packet_word_for(
-        idx      : natural;
-        samples  : sample_buf_t;
-        stored   : unsigned(1 downto 0)
+        idx         : natural;
+        samples     : sample_buf_t;
+        stored      : unsigned(1 downto 0);
+        header_data : std_logic_vector(31 downto 0)  -- Pass header as parameter
     ) return std_logic_vector is
         constant ZERO32 : std_logic_vector(31 downto 0) := (others => '0');
         variable stored_int : integer;
@@ -84,7 +109,7 @@ architecture rtl of audio_sample_packet is
         stored_int := to_integer(stored);
         case idx is
             when 0 =>
-                return HEADER_WORD;
+                return header_data;  -- Use passed header parameter
             when 1 =>
                 if stored_int >= 1 then
                     return samples(0);
@@ -124,14 +149,27 @@ architecture rtl of audio_sample_packet is
     --------------------------------------------------------------------------------
     -- Synthesis Attributes
     --------------------------------------------------------------------------------
-    attribute syn_preserve : boolean;
-    attribute syn_keep : boolean;
-    
     attribute syn_preserve of packet_valid_reg : signal is true;
     attribute syn_preserve of packets_sent_count : signal is true;
     attribute syn_keep of packet_valid_reg : signal is true;
 
 begin
+
+    --------------------------------------------------------------------------------
+    -- BCH ECC Calculation for ASP Packet Header
+    --------------------------------------------------------------------------------
+    -- Header: HB0=0x02, HB1=0x00, HB2=0x00
+    asp_header <= ASP_HB2 & ASP_HB1 & ASP_HB0;
+    
+    bch_ecc_inst: bch_ecc
+        port map (
+            header_in => asp_header,
+            ecc_out   => asp_ecc
+        );
+    
+    -- Assemble header word with BCH ECC
+    -- Word format: [ECC] [HB2] [HB1] [HB0]
+    header_word <= asp_ecc & ASP_HB2 & ASP_HB1 & ASP_HB0;
 
     --------------------------------------------------------------------------------
     -- ASP Builder State Machine (two-stage: collect samples, then stream packet)
@@ -188,7 +226,7 @@ begin
                 -- STREAM_PACKET: provide eight 32-bit words to scheduler
                 ----------------------------------------------------------------
                 when ST_STREAM_PACKET =>
-                    packet_data_reg <= packet_word_for(to_integer(word_index), sample_buffer, sample_count);
+                    packet_data_reg <= packet_word_for(to_integer(word_index), sample_buffer, sample_count, header_word);
                     packet_valid_reg <= '1';
 
                     if word_index = 0 then

@@ -20,13 +20,12 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.hdmi_config_pkg.all;
 
 entity hdmi_encoder is
     generic (
-        H_ACTIVE  : integer := 640;
-        H_TOTAL   : integer := 800;
-        V_ACTIVE  : integer := 480;
-        V_TOTAL   : integer := 525
+        TIMING : video_timing_t := HDMI_TIMING_640x480;
+        AUDIO  : audio_config_t := HDMI_AUDIO_DEFAULT
     );
     port (
         -- Clocks and reset
@@ -46,7 +45,7 @@ entity hdmi_encoder is
         audio_l     : in  std_logic_vector(15 downto 0);
         audio_r     : in  std_logic_vector(15 downto 0);
         audio_valid : in  std_logic := '1';
-    audio_mute  : in  std_logic := '0';
+        audio_mute  : in  std_logic := '0';
         
         -- Timing outputs
         h_count_out     : out unsigned(10 downto 0);
@@ -125,7 +124,8 @@ architecture rtl of hdmi_encoder is
         generic (
             AUDIO_SAMPLE_RATE : integer;
             PIXEL_CLK_FREQ    : integer;
-            ACR_INTERVAL      : integer
+            ACR_INTERVAL      : integer;
+            N_VALUE           : integer
         );
         port (
             clk_pixel       : in  std_logic;
@@ -173,11 +173,7 @@ architecture rtl of hdmi_encoder is
     
     component packet_scheduler
         generic (
-            H_ACTIVE : integer;
-            H_SYNC   : integer;
-            H_BACK   : integer;
-            H_FRONT  : integer;
-            H_TOTAL  : integer
+            TIMING : video_timing_t
         );
         port (
             clk_pixel       : in  std_logic;
@@ -221,6 +217,7 @@ architecture rtl of hdmi_encoder is
             data_out        : out std_logic_vector(9 downto 0)
         );
     end component;
+
     
     component OSER10
         port (
@@ -255,11 +252,35 @@ architecture rtl of hdmi_encoder is
     signal horizontal_position  : unsigned(10 downto 0) := (others => '0');
     signal vertical_position    : unsigned(9 downto 0)  := (others => '0');
     signal data_enable          : std_logic;
-    signal sync_control_signals : std_logic_vector(1 downto 0);
+   signal sync_control_signals : std_logic_vector(1 downto 0);
+   signal dvi_mode             : std_logic;
     
     -- Vsync edge detection
     signal vsync_prev    : std_logic;
     signal vsync_rising  : std_logic;
+
+    --------------------------------------------------------------------------------
+    -- Derived Timing/Audio Constants (Single Source of Truth)
+    --------------------------------------------------------------------------------
+    constant H_ACTIVE        : integer := TIMING.h_active;
+    constant H_TOTAL         : integer := TIMING.h_total;
+    constant H_ACTIVE_START  : integer := TIMING.h_active_start;
+    constant H_ACTIVE_END    : integer := H_ACTIVE_START + H_ACTIVE;
+
+    constant V_ACTIVE        : integer := TIMING.v_active;
+    constant V_TOTAL         : integer := TIMING.v_total;
+    constant V_ACTIVE_START  : integer := TIMING.v_active_start;
+    constant V_ACTIVE_END    : integer := V_ACTIVE_START + V_ACTIVE;
+
+    constant PIXEL_CLK_FREQ     : integer := AUDIO.pixel_clock_hz;
+    constant AUDIO_SAMPLE_RATE  : integer := AUDIO.sample_rate;
+    constant ACR_N_VALUE        : integer := AUDIO.acr_n_value;
+    constant ACR_INTERVAL       : integer := AUDIO.acr_interval;
+
+    constant H_ACTIVE_START_U : unsigned(horizontal_position'range) := to_unsigned(H_ACTIVE_START, horizontal_position'length);
+    constant H_ACTIVE_END_U   : unsigned(horizontal_position'range) := to_unsigned(H_ACTIVE_END, horizontal_position'length);
+    constant V_ACTIVE_START_U : unsigned(vertical_position'range)   := to_unsigned(V_ACTIVE_START, vertical_position'length);
+    constant V_ACTIVE_END_U   : unsigned(vertical_position'range)   := to_unsigned(V_ACTIVE_END, vertical_position'length);
     
     --------------------------------------------------------------------------------
     -- Audio Buffer Signals
@@ -343,7 +364,7 @@ architecture rtl of hdmi_encoder is
     signal dbg_acr_packets  : std_logic_vector(15 downto 0);
     signal dbg_samples_in   : std_logic_vector(15 downto 0);
 
-begin
+    begin
 
     -- Apply mute control by zeroing incoming samples when requested
     audio_l_mux <= (others => '0') when audio_mute = '1' else audio_l;
@@ -351,8 +372,15 @@ begin
 
     serializer_reset <= not rst_n;
 
+    -- DVI mode is enabled when audio is not valid
+    dvi_mode <= not audio_valid;
+
     --------------------------------------------------------------------------------
-    -- Video Timing Counter
+    -- Video Timing Counter (driven by shared configuration)
+    --------------------------------------------------------------------------------
+    -- Counter sequencing: front porch -> sync -> back porch -> active video
+    --   Horizontal positions derived from TIMING record
+    --   Default values correspond to 640x480@60Hz
     --------------------------------------------------------------------------------
     timing_counter: process(clk_pixel, rst_n)
     begin
@@ -373,8 +401,9 @@ begin
         end if;
     end process timing_counter;
 
-    -- Data enable signal generation
-    data_enable <= '1' when (horizontal_position < H_ACTIVE and vertical_position < V_ACTIVE) else '0';
+    -- Data enable signal generation driven by shared timing configuration
+    data_enable <= '1' when (horizontal_position >= H_ACTIVE_START_U and horizontal_position < H_ACTIVE_END_U and
+                             vertical_position >= V_ACTIVE_START_U and vertical_position < V_ACTIVE_END_U) else '0';
 
     -- Output timing signals
     h_count_out <= horizontal_position;
@@ -447,9 +476,10 @@ begin
     --------------------------------------------------------------------------------
     acr_gen: acr_packet
         generic map (
-            AUDIO_SAMPLE_RATE => 48_000,
-            PIXEL_CLK_FREQ    => 25_200_000,
-            ACR_INTERVAL      => 420_000  -- Every frame
+            AUDIO_SAMPLE_RATE => AUDIO_SAMPLE_RATE,
+            PIXEL_CLK_FREQ    => PIXEL_CLK_FREQ,
+            ACR_INTERVAL      => ACR_INTERVAL,
+            N_VALUE           => ACR_N_VALUE
         )
         port map (
             clk_pixel       => clk_pixel,
@@ -503,11 +533,7 @@ begin
     --------------------------------------------------------------------------------
     scheduler: packet_scheduler
         generic map (
-            H_ACTIVE => 640,
-            H_SYNC   => 96,
-            H_BACK   => 48,
-            H_FRONT  => 16,
-            H_TOTAL  => 800
+            TIMING => TIMING
         )
         port map (
             clk_pixel       => clk_pixel,
@@ -597,8 +623,8 @@ begin
             tmds_terc4_green <= (others => '0');
             tmds_terc4_blue <= (others => '0');
         elsif rising_edge(clk_pixel) then
-            -- Audio/Data island path active during packet transmission
-            if island_active = '1' or preamble_active = '1' or guard_band = '1' then
+            -- Audio/Data island path active during packet transmission (HDMI only)
+            if (island_active = '1' or preamble_active = '1' or guard_band = '1') and dvi_mode = '0' then
                 -- Data island mode: Use TERC4 encoded data
                 tmds_input_de <= '0';
                 tmds_input_ctrl <= "00";

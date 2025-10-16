@@ -29,15 +29,11 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.hdmi_config_pkg.all;
 
 entity packet_scheduler is
     generic (
-        -- Timing parameters for 640×480@60Hz
-        H_ACTIVE    : integer := 640;   -- Active pixels
-        H_SYNC      : integer := 96;    -- Sync pulse width
-        H_BACK      : integer := 48;    -- Back porch pixels
-        H_FRONT     : integer := 16;    -- Front porch pixels
-        H_TOTAL     : integer := 800    -- Total pixels per line
+        TIMING : video_timing_t := HDMI_TIMING_640x480
     );
     port (
         -- Clock and reset
@@ -88,12 +84,21 @@ end packet_scheduler;
 architecture rtl of packet_scheduler is
 
     --------------------------------------------------------------------------------
+    -- Timing constants (single source of truth)
+    --------------------------------------------------------------------------------
+    constant H_SYNC   : integer := TIMING.h_sync;
+    constant H_BACK   : integer := TIMING.h_back;
+    constant H_FRONT  : integer := TIMING.h_front;
+
+    --------------------------------------------------------------------------------
     -- Timing Constants
     --------------------------------------------------------------------------------
     -- Back porch window: from end of hsync to start of active video
-    -- H_SYNC = 96, so back porch starts at pixel 96 and ends at pixel 96+48=144
-    constant H_BACK_START : integer := H_SYNC;
-    constant H_BACK_END   : integer := H_SYNC + H_BACK;
+    -- Standard timing: Front porch -> Sync -> Back porch -> Active video
+    -- Back porch starts at pixel 112 and ends at pixel 159 (48 pixels total)
+    -- Note: H_FRONT is already declared as generic parameter
+    constant H_BACK_START : integer := H_FRONT + H_SYNC;            
+    constant H_BACK_END   : integer := H_FRONT + H_SYNC + H_BACK;   
     
     -- Packet island timing (all in back porch)
     constant PREAMBLE_LENGTH : integer := 8;   -- 8 pixels
@@ -210,7 +215,8 @@ begin
         if rst_n = '0' then
             in_back_porch <= '0';
         elsif rising_edge(clk_pixel) then
-            -- Back porch window: pixel 96 to 143 (48 pixels)
+            -- Back porch window: pixel 112 to 159 (48 pixels)
+            -- This is the FULL back porch period in standard VGA timing
             if h_count >= H_BACK_START and h_count < H_BACK_END then
                 in_back_porch <= '1';
             else

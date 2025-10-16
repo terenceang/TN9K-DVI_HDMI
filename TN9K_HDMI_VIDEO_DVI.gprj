@@ -6,6 +6,7 @@
     <Device name="GW1NR-9C" pn="GW1NR-LV9QN88C6/I5">gw1nr9c-000</Device>
     <FileList>
         <File path="src/hdmi_config_pkg.vhd" type="file.vhdl" enable="1"/>
+        <File path="src/tn9k_hdmi_video_top.vhd" type="file.vhdl" enable="1"/>
         <File path="src/hdmi_encoder.vhd" type="file.vhdl" enable="1"/>
         <File path="src/acr_packet.vhd" type="file.vhdl" enable="1"/>
         <File path="src/audio_ce_gen.vhd" type="file.vhdl" enable="1"/>
@@ -22,7 +23,6 @@
         <File path="src/test_pattern_gen.vhd" type="file.vhdl" enable="1"/>
         <File path="src/tmds_encoder.vhd" type="file.vhdl" enable="1"/>
         <File path="src/tn9k_clock_generator.vhd" type="file.vhdl" enable="1"/>
-        <File path="src/tn9k_hdmi_video_top.vhd" type="file.vhdl" enable="1"/>
         <File path="src/tangnano9k.cst" type="file.cst" enable="1"/>
         <File path="src/TN9K_HDMI_VIDEO.sdc" type="file.sdc" enable="1"/>
         <File path="src/TN9K_HDMI_VIDEO.rao" type="file.gao" enable="1"/>

@@ -19,6 +19,7 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.hdmi_config_pkg.all;
 
 entity tn9k_hdmi_video_top is
     port (
@@ -51,10 +52,7 @@ architecture rtl of tn9k_hdmi_video_top is
 
     component test_pattern_gen
         generic (
-            H_ACTIVE  : integer;
-            H_TOTAL   : integer;
-            V_ACTIVE  : integer;
-            V_TOTAL   : integer
+            TIMING : video_timing_t
         );
         port (
             clk_pixel       : in  std_logic;
@@ -72,10 +70,8 @@ architecture rtl of tn9k_hdmi_video_top is
 
     component hdmi_encoder
         generic (
-            H_ACTIVE  : integer;
-            H_TOTAL   : integer;
-            V_ACTIVE  : integer;
-            V_TOTAL   : integer
+            TIMING : video_timing_t;
+            AUDIO  : audio_config_t
         );
         port (
             clk_pixel      : in  std_logic;
@@ -135,13 +131,10 @@ architecture rtl of tn9k_hdmi_video_top is
     end component;
 
     --------------------------------------------------------------------------------
-    -- Constants
+    -- Configuration Records
     --------------------------------------------------------------------------------
-
-    constant H_ACTIVE : integer := 640;
-    constant H_TOTAL  : integer := 800;
-    constant V_ACTIVE : integer := 480;
-    constant V_TOTAL  : integer := 525;
+    constant TIMING_CFG : video_timing_t := HDMI_TIMING_640x480;
+    constant AUDIO_CFG  : audio_config_t := HDMI_AUDIO_DEFAULT;
 
     --------------------------------------------------------------------------------
     -- Internal Signals
@@ -151,6 +144,7 @@ architecture rtl of tn9k_hdmi_video_top is
     signal pixel_clock          : std_logic;
     signal serial_clock_5x      : std_logic;
     signal clock_pll_locked     : std_logic;
+    signal pll_reset            : std_logic;  -- Active-high reset for PLL
 
     -- Reset synchronization (2-stage synchronizer for metastability protection)
     signal reset_sync_stage1    : std_logic;
@@ -182,6 +176,12 @@ architecture rtl of tn9k_hdmi_video_top is
 begin
 
     --------------------------------------------------------------------------------
+    -- Reset Signal Conversion
+    --------------------------------------------------------------------------------
+    -- Convert active-low reset to active-high for PLL
+    pll_reset <= not rst_n;
+
+    --------------------------------------------------------------------------------
     -- Clock Generation
     --------------------------------------------------------------------------------
     -- 27 MHz -> 126 MHz (serial) and 25.2 MHz (pixel)
@@ -189,7 +189,7 @@ begin
     clock_generator_inst: tn9k_clock_generator
         port map (
             clkin   => clk_27m,
-            reset   => not rst_n,
+            reset   => pll_reset,
             clkout0 => pixel_clock,
             clkout1 => serial_clock_5x,
             lock    => clock_pll_locked
@@ -219,10 +219,7 @@ begin
     --------------------------------------------------------------------------------
     pattern_generator_inst: test_pattern_gen
         generic map (
-            H_ACTIVE => H_ACTIVE,
-            H_TOTAL  => H_TOTAL,
-            V_ACTIVE => V_ACTIVE,
-            V_TOTAL  => V_TOTAL
+            TIMING => TIMING_CFG
         )
         port map (
             clk_pixel      => pixel_clock,
@@ -242,8 +239,8 @@ begin
     --------------------------------------------------------------------------------
     audio_ce_generator: audio_ce_gen
         generic map (
-            PIXEL_CLK_FREQ    => 25_200_000,
-            AUDIO_SAMPLE_RATE => 48_000
+            PIXEL_CLK_FREQ    => AUDIO_CFG.pixel_clock_hz,
+            AUDIO_SAMPLE_RATE => AUDIO_CFG.sample_rate
         )
         port map (
             clk_pixel       => pixel_clock,
@@ -272,10 +269,8 @@ begin
     --------------------------------------------------------------------------------
     hdmi_encoder_inst: hdmi_encoder
         generic map (
-            H_ACTIVE => H_ACTIVE,
-            H_TOTAL  => H_TOTAL,
-            V_ACTIVE => V_ACTIVE,
-            V_TOTAL  => V_TOTAL
+            TIMING => TIMING_CFG,
+            AUDIO  => AUDIO_CFG
         )
         port map (
             -- Clock and reset
@@ -292,7 +287,7 @@ begin
             audio_ce       => audio_clock_enable,
             audio_l        => audio_l_test,
             audio_r        => audio_r_test,
-            audio_valid    => '1',  -- Always valid when test tone enabled
+            audio_valid    => '1',  -- Enable audio test tone
             audio_mute     => '0',
             -- HDMI outputs
             tmds_clk_p     => tmds_clk_p,

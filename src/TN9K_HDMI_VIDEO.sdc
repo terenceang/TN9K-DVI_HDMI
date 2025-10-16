@@ -82,3 +82,21 @@ set_false_path -to [get_ports {tmds_clk_n}]
 set_false_path -from [get_cells {reset_synchronized_s0}] -to [get_pins {hdmi_encoder_inst/serializer_blue/RESET}]
 set_false_path -from [get_cells {reset_synchronized_s0}] -to [get_pins {hdmi_encoder_inst/serializer_green/RESET}]
 set_false_path -from [get_cells {reset_synchronized_s0}] -to [get_pins {hdmi_encoder_inst/serializer_red/RESET}]
+
+# ------------------------------------------------------------------
+# Exclude GAO / JTAG / ICON / LA debug capture logic from STA
+# These modules are used for on-chip debug and are asynchronous to the
+# functional pixel/serial clocks (sampled by JTAG TCK). Marking their
+# paths as false prevents large negative slacks from cross-domain checks.
+# Adjust names if your timing report shows different instance names.
+# ------------------------------------------------------------------
+
+# Conservative false-paths: from GAO/JTAG/ICON/LA cells to any clock domain
+set_false_path -from [get_cells {gw_gao*}] -to [get_clocks *]
+set_false_path -from [get_cells {gw_con*}] -to [get_clocks *]
+set_false_path -from [get_cells {ao_top*}] -to [get_clocks *]
+
+# Also mark the physical JTAG input ports as false-path sources
+set_false_path -from [get_ports {tck_pad_i tms_pad_i tdi_pad_i}] -to [get_clocks *]
+
+# End of GAO/JTAG false-paths
